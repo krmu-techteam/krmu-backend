@@ -3,38 +3,87 @@ import { db } from '../database/database';
 
 @Injectable()
 export class MigrationService {
+  private getNestedValue(obj: any, path: string) {
+    return path.split('.').reduce((acc, key) => acc?.[key], obj);
+  }
+
   async getFaculty() {
+    const [rows] = await db.query('SELECT 1 AS test');
+
+    console.log(rows);
+
+    return rows;
+  }
+
+  async getWPData({
+    type,
+    table,
+    mapping,
+  }: {
+    type: string;
+    table: string;
+    mapping: Record<string, string>;
+  }) {
     let page = 1;
     const perPage = 100;
     let totalInserted = 0;
 
     while (true) {
-      console.log(`Fetching page ${page}...`);
+      console.log(`Fetching ${type} - Page ${page}`);
+
       const response = await fetch(
-        `https://wp.krmangalam.edu.in/wp-json/wp/v2/faculty?page=${page}&per_page=${perPage}&_fields=title`,
+        `https://wp.krmangalam.edu.in/wp-json/wp/v2/${type}?page=${page}&per_page=${perPage}`,
       );
-      // Stop if page doesn't exist
+
       if (!response.ok) {
         break;
       }
-      const faculties = await response.json();
-      // No more data
-      if (faculties.length === 0) {
+
+      const records = await response.json();
+
+      if (!records.length) {
         break;
       }
 
-      for (const faculty of faculties) {
-        await db.execute(`INSERT INTO faculties (name) VALUES (?)`, [
-          faculty.title.rendered,
-        ]);
+      // Database columns
+      const columns = Object.keys(mapping);
+
+      // SQL placeholders (?, ?, ?, ...)
+      const placeholders = columns.map(() => '?').join(',');
+
+      // ON DUPLICATE KEY UPDATE
+      const updates = columns
+        .filter((c) => c !== 'id')
+        .map((c) => `${c}=VALUES(${c})`)
+        .join(',');
+
+      const sql = `
+      INSERT INTO ${table}
+      (${columns.join(',')})
+      VALUES (${placeholders})
+      ON DUPLICATE KEY UPDATE
+      ${updates}
+    `;
+
+      for (const record of records) {
+        const values = columns.map((column) =>
+          this.getNestedValue(record, mapping[column]),
+        );
+
+        await db.execute(sql, values);
+
         totalInserted++;
       }
-      console.log(`Page ${page}: ${faculties.length} records inserted.`);
+
+      console.log(
+        `Page ${page}: ${records.length} records inserted into ${table}.`,
+      );
 
       page++;
     }
+
     return {
-      message: 'Migration completed.',
+      message: `${type} migration completed.`,
       totalInserted,
     };
   }
