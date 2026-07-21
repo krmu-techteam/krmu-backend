@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { CatsController } from './cats.controller';
 import { ConfigModule } from '@nestjs/config';
 import { MigrationModule } from './migration/migration.module';
+import { FacultyModule } from './faculty/faculty.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { MigrationModule } from './migration/migration.module';
       envFilePath: '.env',
     }),
     MigrationModule,
+    FacultyModule,
   ],
   controllers: [AppController, CatsController],
   providers: [AppService],

@@ -5,10 +5,10 @@ import { MigrationService } from './migration.service';
 export class MigrationController {
   constructor(private readonly migrationService: MigrationService) {}
 
-  @Get()
-  async migrate() {
-    return this.migrationService.getFaculty();
-  }
+  // @Get()
+  // async migrate() {
+  //   return this.migrationService.getFaculty();
+  // }
 
   @Get('faculty')
   async migrateFaculty() {
@@ -16,8 +16,14 @@ export class MigrationController {
       type: 'faculty',
       table: 'faculties',
       mapping: {
-        id: 'id',
+        wp_id: 'id',
         name: 'title.rendered',
+        slug: 'slug',
+        description: 'content.rendered',
+        qualification: 'acf.staff-qualification',
+        designation: 'acf.staff_designation',
+        sort_order: 'menu_order',
+        image_url: 'yoast_head_json.og_image.0.url',
       },
     });
   }

@@ -7,14 +7,6 @@ export class MigrationService {
     return path.split('.').reduce((acc, key) => acc?.[key], obj);
   }
 
-  async getFaculty() {
-    const [rows] = await db.query('SELECT 1 AS test');
-
-    console.log(rows);
-
-    return rows;
-  }
-
   async getWPData({
     type,
     table,
