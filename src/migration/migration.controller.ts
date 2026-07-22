@@ -22,22 +22,16 @@ export class MigrationController {
         description: 'content.rendered',
         qualification: 'acf.staff-qualification',
         designation: 'acf.staff_designation',
-        sort_order: 'menu_order',
-        image_url: 'yoast_head_json.og_image.0.url',
+        // sort_order: 'menu_order',
+        // image_url: 'yoast_head_json.og_image.0.url',
       },
     });
   }
-  @Get('schools')
-  async migrateSchools() {
-    return this.migrationService.getWPData({
-      type: 'schools',
-      table: 'schools',
-      mapping: {
-        id: 'id',
-        name: 'title.rendered',
-      },
-    });
+  @Get('school-categories')
+  async migrateSchoolCategories() {
+    return this.migrationService.getSchoolCategories();
   }
+
   @Get('news-events')
   async migrateNewsEvents() {
     return this.migrationService.getWPData({

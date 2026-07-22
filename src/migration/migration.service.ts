@@ -79,4 +79,38 @@ export class MigrationService {
       totalInserted,
     };
   }
+
+  async getSchoolCategories() {
+    const response = await fetch(
+      'https://truthful-cabbage-82fd27e8f6.strapiapp.com/api/school-categories',
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch school categories');
+    }
+
+    const { data } = await response.json();
+
+    let totalInserted = 0;
+
+    for (const school of data) {
+      await db.execute(
+        `
+      INSERT INTO school_categories (id, school_name, slug)
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        school_name = VALUES(school_name),
+        slug = VALUES(slug)
+      `,
+        [school.id, school.name, school.slug],
+      );
+
+      totalInserted++;
+    }
+
+    return {
+      message: 'School categories migrated successfully.',
+      totalInserted,
+    };
+  }
 }
