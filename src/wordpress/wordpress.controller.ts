@@ -1,18 +1,18 @@
-import { Controller, Get } from '@nestjs/common';
-import { MigrationService } from './migration.service';
+import { Controller, Get, Param } from '@nestjs/common';
+import { WordpressService } from './wordpress.service';
 
-@Controller('migration')
-export class MigrationController {
-  constructor(private readonly migrationService: MigrationService) {}
+@Controller('wordpress')
+export class WordpressController {
+  constructor(private readonly wordpressService: WordpressService) {}
 
-  // @Get()
-  // async migrate() {
-  //   return this.migrationService.getFaculty();
-  // }
+  @Get('test-image/:id')
+  async test(@Param('id') id: string) {
+    return this.wordpressService.testImageUpload(Number(id));
+  }
 
   @Get('faculty')
   async migrateFaculty() {
-    return this.migrationService.getWPData({
+    return this.wordpressService.getWPData({
       type: 'faculty',
       table: 'faculties',
       mapping: {
@@ -29,12 +29,12 @@ export class MigrationController {
   }
   @Get('school-categories')
   async migrateSchoolCategories() {
-    return this.migrationService.getSchoolCategories();
+    return this.wordpressService.getSchoolCategories();
   }
 
   @Get('news-events')
   async migrateNewsEvents() {
-    return this.migrationService.getWPData({
+    return this.wordpressService.getWPData({
       type: 'events-and-news',
       table: 'news_events',
       mapping: {
