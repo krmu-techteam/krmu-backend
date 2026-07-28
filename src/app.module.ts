@@ -3,8 +3,9 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CatsController } from './cats.controller';
 import { ConfigModule } from '@nestjs/config';
-import { MigrationModule } from './migration/migration.module';
+import { WordpressModule } from './wordpress/wordpress.module';
 import { FacultyModule } from './faculty/faculty.module';
+import { CloudflareModule } from './cloudfare/cloudflare.module';
 
 @Module({
   imports: [
@@ -12,8 +13,9 @@ import { FacultyModule } from './faculty/faculty.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    MigrationModule,
+    WordpressModule,
     FacultyModule,
+    CloudflareModule,
   ],
   controllers: [AppController, CatsController],
   providers: [AppService],

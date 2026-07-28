@@ -1,15 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { MigrationService } from './migration.service';
+import { WordpressService } from './wordpress.service';
 
-describe('MigrationService', () => {
-  let service: MigrationService;
+describe('WordpressService', () => {
+  let service: WordpressService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [MigrationService],
+      providers: [WordpressService],
     }).compile();
 
-    service = module.get<MigrationService>(MigrationService);
+    service = module.get<WordpressService>(WordpressService);
   });
 
   it('should be defined', () => {

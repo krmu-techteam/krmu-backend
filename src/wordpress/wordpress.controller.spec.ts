@@ -1,15 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { MigrationController } from './migration.controller';
+import { WordpressController } from './wordpress.controller';
 
-describe('MigrationController', () => {
-  let controller: MigrationController;
+describe('WordpressController', () => {
+  let controller: WordpressController;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [MigrationController],
+      controllers: [WordpressController],
     }).compile();
 
-    controller = module.get<MigrationController>(MigrationController);
+    controller = module.get<WordpressController>(WordpressController);
   });
 
   it('should be defined', () => {
