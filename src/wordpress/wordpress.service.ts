@@ -3,11 +3,14 @@ import { db } from '../database/database';
 import { firstValueFrom } from 'rxjs';
 import { HttpService } from '@nestjs/axios';
 import { CloudflareService } from 'src/cloudfare/cloudflare.service';
+import * as path from 'path';
+import { getFolderFromMimeType } from 'src/helper/media.helper';
 
-interface MediaIdResponse {
+interface MediaResponse {
   guid: {
     rendered: string;
   };
+  mime_type: string;
 }
 
 @Injectable()
@@ -27,10 +30,16 @@ export class WordpressService {
     type,
     table,
     mapping,
+    uploadFields = [],
   }: {
     type: string;
     table: string;
     mapping: Record<string, string>;
+    uploadFields?: {
+      dbColumn: string;
+      wpField: string;
+      filename?: (record: any) => string;
+    }[];
   }) {
     let page = 1;
     const perPage = 100;
@@ -74,17 +83,35 @@ export class WordpressService {
     `;
 
       for (const record of records) {
-        const row: any = {};
+        const row: Record<string, any> = {};
 
         for (const column of columns) {
           row[column] = this.getNestedValue(record, mapping[column]);
         }
 
-        if (record.featured_media) {
-          row.image = await this.uploadWordpressMedia(
-            record.featured_media,
-            `${record.slug}.jpg`,
-          );
+        for (const uploadField of uploadFields) {
+          const mediaId = this.getNestedValue(record, uploadField.wpField);
+
+          if (!mediaId) continue;
+
+          try {
+            const filename = uploadField.filename
+              ? uploadField.filename(record)
+              : `${record.id}-${record.slug}`;
+
+            row[uploadField.dbColumn] = await this.uploadWordpressAsset(
+              type,
+              mediaId,
+              filename,
+            );
+          } catch (err) {
+            console.error(
+              `Failed uploading ${uploadField.dbColumn} for ${record.slug}`,
+              err,
+            );
+
+            row[uploadField.dbColumn] = null;
+          }
         }
 
         const values = columns.map((column) => row[column]);
@@ -141,19 +168,24 @@ export class WordpressService {
     };
   }
 
-  async getMediaById(imgId: number): Promise<string | null> {
+  async getMediaById(
+    imgId: number,
+  ): Promise<{ url: string; mimeType: string } | null> {
     if (!imgId) return null;
 
     try {
       const { data } = await firstValueFrom(
-        this.http.get<MediaIdResponse>(
-          `https://wp.krmangalam.edu.in/wp-json/wp/v2/media/${imgId}?_fields=guid`,
+        this.http.get<MediaResponse>(
+          `https://wp.krmangalam.edu.in/wp-json/wp/v2/media/${imgId}?_fields=guid,mime_type`,
         ),
       );
 
-      return data?.guid?.rendered ?? null;
+      return {
+        url: data.guid.rendered,
+        mimeType: data.mime_type,
+      };
     } catch (error) {
-      this.logger.warn(`Image not found for ID ${imgId}`);
+      this.logger.warn(`Media not found for ID ${imgId}`);
       return null;
     }
   }
@@ -168,50 +200,24 @@ export class WordpressService {
     return Buffer.from(data);
   }
 
-  async uploadWordpressMedia(
+  async uploadWordpressAsset(
+    type: string,
     mediaId: number,
     filename: string,
   ): Promise<string | null> {
-    const mediaUrl = await this.getMediaById(mediaId);
+    const media = await this.getMediaById(mediaId);
 
-    if (!mediaUrl) {
-      return null;
-    }
+    if (!media) return null;
 
-    const buffer = await this.downloadMedia(mediaUrl);
+    const mimeType = getFolderFromMimeType(media.mimeType);
 
-    return await this.cloudflareService.uploadWordpressMedia(filename, buffer);
-  }
+    const extension = path.extname(media.url);
 
-  async testImageUpload(mediaId: number) {
-    console.log('Step 1: Fetching media URL...');
+    const buffer = await this.downloadMedia(media.url);
 
-    const mediaUrl = await this.getMediaById(mediaId);
-
-    console.log('Media URL:', mediaUrl);
-
-    if (!mediaUrl) {
-      throw new Error('Media URL not found');
-    }
-
-    console.log('Step 2: Downloading image...');
-
-    const buffer = await this.downloadMedia(mediaUrl);
-
-    console.log('Downloaded Buffer Size:', buffer.length);
-
-    console.log('Step 3: Uploading to Cloudflare...');
-
-    const cloudflareUrl = await this.cloudflareService.uploadWordpressMedia(
-      `${mediaId}.jpg`,
+    return this.cloudflareService.uploadWordpressMedia(
+      `${mimeType}/${type}/${filename}${extension}`,
       buffer,
     );
-
-    console.log('Cloudflare URL:', cloudflareUrl);
-
-    return {
-      mediaUrl,
-      cloudflareUrl,
-    };
   }
 }

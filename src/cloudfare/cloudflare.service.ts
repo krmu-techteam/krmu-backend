@@ -66,7 +66,7 @@ export class CloudflareService implements OnModuleInit {
     await this.s3.send(
       new PutObjectCommand({
         Bucket: this.bucketName,
-        Key: fileName,
+        Key: `${fileName}`,
         Body: fileBuffer,
         ContentType: contentType,
       }),

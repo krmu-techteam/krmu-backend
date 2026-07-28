@@ -5,10 +5,10 @@ import { WordpressService } from './wordpress.service';
 export class WordpressController {
   constructor(private readonly wordpressService: WordpressService) {}
 
-  @Get('test-image/:id')
-  async test(@Param('id') id: string) {
-    return this.wordpressService.testImageUpload(Number(id));
-  }
+  // @Get('test-image/:id')
+  // async test(@Param('id') id: string) {
+  //   return this.wordpressService.testImageUpload(Number(id));
+  // }
 
   @Get('faculty')
   async migrateFaculty() {
@@ -22,9 +22,14 @@ export class WordpressController {
         description: 'content.rendered',
         qualification: 'acf.staff-qualification',
         designation: 'acf.staff_designation',
-        // sort_order: 'menu_order',
-        // image_url: 'yoast_head_json.og_image.0.url',
+        image_url: 'featured_media',
       },
+      uploadFields: [
+        {
+          dbColumn: 'image_url',
+          wpField: 'featured_media',
+        },
+      ],
     });
   }
   @Get('school-categories')
