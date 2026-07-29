@@ -3,6 +3,7 @@ import {
   S3Client,
   PutObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -34,6 +35,31 @@ export class CloudflareService implements OnModuleInit {
     });
   }
 
+  getPublicUrl(key: string): string {
+    return `${process.env.R2_PUBLIC_URL}/${key}`;
+  }
+
+  async fileExists(key: string): Promise<boolean> {
+    try {
+      await this.s3.send(
+        new HeadObjectCommand({
+          Bucket: process.env.R2_BUCKET!,
+          Key: key,
+        }),
+      );
+
+      return true;
+    } catch (error: any) {
+      if (
+        error?.name === 'NotFound' ||
+        error?.$metadata?.httpStatusCode === 404
+      ) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
   async onModuleInit() {
     try {
       await this.s3.send(
@@ -57,8 +83,6 @@ export class CloudflareService implements OnModuleInit {
 
     const fileName =
       filename.replace(fileExt, '').toLowerCase().split(' ').join('-') +
-      '-' +
-      Date.now() +
       fileExt;
 
     const contentType = lookup(fileExt) || 'application/octet-stream';

@@ -60,3 +60,8 @@ export function getFolderFromMimeType(mimeType: string): string {
 
   return 'Others';
 }
+
+
+
+
+

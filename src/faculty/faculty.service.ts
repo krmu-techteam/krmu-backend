@@ -1,17 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { db } from '../database/database';
-import {
-  CountResult,
-  FacultyCard,
-  FacultyCardResponse,
-} from './faculty.types';
+import { CountResult, FacultyCard, FacultyCardResponse } from './faculty.types';
 
 @Injectable()
 export class FacultyService {
-  async getFacultyCards(
-    page = 1,
-    limit = 10,
-  ): Promise<FacultyCardResponse> {
+  async getFacultyCards(page = 1, limit = 10): Promise<FacultyCardResponse> {
     // Ensure valid values
     page = Math.max(1, Number(page));
     limit = Math.min(100, Math.max(1, Number(limit)));
@@ -27,6 +20,7 @@ export class FacultyService {
           name,
           slug,
           designation,
+          image_url,
           qualification
         FROM faculties
         ORDER BY name ASC
@@ -49,6 +43,14 @@ export class FacultyService {
         limit,
         totalPages: Math.ceil(total / limit),
       },
+    };
+  }
+  async createFaculty(data: { name: string }) {
+    const { name } = data;
+    console.log('name', name);
+    return {
+      success: true,
+      name,
     };
   }
 }

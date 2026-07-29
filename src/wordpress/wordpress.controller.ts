@@ -50,7 +50,15 @@ export class WordpressController {
         excerpt: 'excerpt.rendered',
         link: 'link',
         published_at: 'date',
+        image_url: 'featured_media',
+        featured_images: 'acf.event_images'
       },
+      uploadFields: [
+        {
+          dbColumn: 'image_url',
+          wpField: ['acf.event_images'],
+        },
+      ],
     });
   }
 }

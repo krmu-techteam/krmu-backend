@@ -21,3 +21,8 @@ export interface FacultyCardResponse {
   data: FacultyCard[];
   pagination: Pagination;
 }
+
+export interface facultyPostType {
+  name: string;
+  // designation: string;
+}
