@@ -1,6 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { db } from '../database/database';
 import { CountResult, FacultyCard, FacultyCardResponse } from './faculty.types';
+import { CreateFacultyDto } from './create-faculty.dto';
+import { ResultSetHeader } from 'mysql2';
+// import { MySqlError } from '../common/mysql-error.type';
+
+export type MySqlError = {
+  code?: string;
+  errno?: number;
+  sqlMessage?: string;
+};
 
 @Injectable()
 export class FacultyService {
@@ -45,12 +58,85 @@ export class FacultyService {
       },
     };
   }
-  async createFaculty(data: { name: string }) {
-    const { name } = data;
-    console.log('name', name);
-    return {
-      success: true,
-      name,
-    };
+  async createFaculty(dto: CreateFacultyDto) {
+    try {
+      const [result] = await db.execute<ResultSetHeader>(
+        `
+          INSERT INTO faculties (
+            school_category_id,
+            name,
+            slug,
+            designation,
+            qualification,
+            image_url,
+            emails,
+            linkedin_profiles,
+            interest_areas,
+            profile,
+            education,
+            experience,
+            research,
+            projects_achievements,
+            conferences,
+            publications,
+            status,
+            sort_order
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          dto.school_category_id ?? null,
+          dto.name,
+          dto.slug,
+          dto.designation,
+          dto.qualification,
+          dto.image_url ?? null,
+
+          JSON.stringify(dto.emails ?? []),
+          JSON.stringify(dto.linkedin_profiles ?? []),
+          JSON.stringify(dto.interest_areas ?? []),
+
+          dto.profile ?? null,
+          dto.education ?? null,
+          dto.experience ?? null,
+          dto.research ?? null,
+          dto.projects_achievements ?? null,
+          dto.conferences ?? null,
+          dto.publications ?? null,
+
+          dto.status ?? 'published',
+          dto.sort_order ?? 0,
+        ],
+      );
+
+      return {
+        success: true,
+        message: 'Faculty created successfully',
+        data: {
+          id: result.insertId,
+        },
+      };
+    } catch (error: unknown) {
+      const dbError = error as MySqlError;
+
+      // Duplicate UNIQUE column
+      if (dbError.code === 'ER_DUP_ENTRY') {
+        throw new ConflictException({
+          success: false,
+          message: 'Faculty already exists',
+          errors: {
+            slug: 'This slug is already in use',
+          },
+        });
+      }
+
+      // Log actual error only on server
+      console.error('Create faculty database error:', error);
+
+      throw new InternalServerErrorException({
+        success: false,
+        message: 'Failed to create faculty',
+      });
+    }
   }
 }

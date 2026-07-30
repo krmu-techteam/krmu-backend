@@ -96,7 +96,7 @@ export class CloudflareService implements OnModuleInit {
       }),
     );
 
-    return `${process.env.R2_PUBLIC_URL}/${fileName}`;
+    return `${process.env.R2_FRONTEND_URL}/${fileName}`;
   }
 }
 
