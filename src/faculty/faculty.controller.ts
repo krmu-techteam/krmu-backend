@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
 import { FacultyService } from './faculty.service';
+import { CreateFacultyDto } from './create-faculty.dto';
 
 @Controller('faculty')
 export class FacultyController {
@@ -11,9 +12,7 @@ export class FacultyController {
   }
 
   @Post()
-  createFaculty(@Body() body: { name: string }) {
-    console.log('BODY:', body);
-
+  createFaculty(@Body() body: CreateFacultyDto) {
     return this.facultyService.createFaculty(body);
   }
 }
