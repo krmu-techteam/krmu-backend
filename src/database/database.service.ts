@@ -59,15 +59,22 @@ export class DatabaseService {
       UPDATE ${table}
       SET ${setClause}
       WHERE id = ?
+      AND deleted_at IS NULL
     `;
 
-    await executor.query(sql, [...values, id]);
-
-    return true;
+    const [result] = await executor.query<ResultSetHeader>(sql, [
+      ...values,
+      id,
+    ]);
+    return result.affectedRows > 0;
   }
 
   /**
    * Delete Record
+   * @param table
+   * @param id
+   * @param connection
+   * @returns
    */
   async delete(table: string, id: number, connection?: PoolConnection) {
     const executor = this.getExecutor(connection);
@@ -93,6 +100,7 @@ export class DatabaseService {
       SELECT *
       FROM ${table}
       WHERE id = ?
+        AND deleted_at IS NULL
       LIMIT 1
     `;
 
@@ -138,6 +146,7 @@ export class DatabaseService {
     const sql = `
       SELECT *
       FROM ${table}
+      WHERE deleted_at IS NULL
       ORDER BY ${orderBy} ${order}
     `;
 
@@ -188,5 +197,49 @@ export class DatabaseService {
     } finally {
       connection.release();
     }
+  }
+
+  /**
+   * Get Trash Records
+   */
+  async findTrash(
+    table: string,
+    orderBy = 'deleted_at',
+    order: 'ASC' | 'DESC' = 'DESC',
+    connection?: PoolConnection,
+  ) {
+    const executor = this.getExecutor(connection);
+    const sql = `
+      SELECT *
+      FROM ${table}
+      WHERE deleted_at IS NOT NULL
+      ORDER BY ${orderBy} ${order}
+    `;
+    const [rows] = await executor.query<RowDataPacket[]>(sql);
+    return rows;
+  }
+
+  /**
+   * Restore
+   *
+   * @param table
+   * @param id
+   * @param connection
+   */
+
+  async restore(
+    table: string,
+    id: number,
+    connection?: PoolConnection,
+  ): Promise<boolean> {
+    const executor = this.getExecutor(connection);
+    const sql = `
+      Update ${table}
+      SET deleted_at = NULL
+      WHERE id = ?
+       AND deleted_at IS NOT NULL
+    `;
+    const [result] = await executor.query<ResultSetHeader>(sql, [id]);
+    return result.affectedRows > 0;
   }
 }

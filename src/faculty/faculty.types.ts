@@ -27,7 +27,6 @@ export interface facultyPostType {
   // designation: string;
 }
 
-
 export interface Faculty {
   id: number;
 
