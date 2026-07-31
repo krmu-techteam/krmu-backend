@@ -6,15 +6,15 @@ import {
 
 import { PoolConnection } from 'mysql2/promise';
 
-import { DatabaseService } from 'src/database/database.service';
-
-import { generateSlug } from 'src/helper/slug.helper';
-import { validateImages } from 'src/helper/file-validation.helper';
 
 import { CreateNewsEventsDto } from './dto/create-news_events.dto';
 import { NewsEventsRepository } from './news_events.repository';
-import { CloudflareService } from 'src/cloudfare/cloudflare.service';
-import { UploadResult } from 'src/common/interfaces/upload-result.interface';
+import { CloudflareService } from '../cloudfare/cloudflare.service';
+import { DatabaseService } from '../database/database.service';
+import { generateSlug } from '../helper/slug.helper';
+import { UploadResult } from '../common/interfaces/upload-result.interface';
+import { validateImages } from '../helper/file-validation.helper';
+
 
 @Injectable()
 export class NewsEventsService {

@@ -1,6 +1,15 @@
-import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FacultyService } from './faculty.service';
 import { CreateFacultyDto } from './create-faculty.dto';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('faculty')
 export class FacultyController {
@@ -12,7 +21,11 @@ export class FacultyController {
   }
 
   @Post()
-  createFaculty(@Body() body: CreateFacultyDto) {
-    return this.facultyService.createFaculty(body);
+  @UseInterceptors(FileInterceptor('image'))
+  createFaculty(
+    @Body() body: CreateFacultyDto,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.facultyService.createFaculty(body, file);
   }
 }

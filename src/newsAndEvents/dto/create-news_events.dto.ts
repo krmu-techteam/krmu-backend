@@ -17,7 +17,7 @@ export class CreateNewsEventsDto {
   link?: string;
 
   @IsDateString()
-  published_at: string;
+  published_at!: string;
 
   @IsOptional()
   @IsDateString()

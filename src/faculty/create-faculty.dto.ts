@@ -18,17 +18,19 @@ export class CreateFacultyDto {
   @IsNotEmpty()
   name!: string;
 
-  @IsString()
-  @IsNotEmpty()
-  slug!: string;
+  // @IsString()
+  // @IsNotEmpty()
+  // slug!: string;
 
   @IsString()
   @IsNotEmpty()
+  @IsOptional()
   designation!: string;
 
   @IsString()
   @IsNotEmpty()
-  qualification!: string;
+  @IsOptional()
+  qualifications!: string;
 
   @IsString()
   @IsOptional()
