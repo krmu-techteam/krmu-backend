@@ -51,7 +51,7 @@ export class WordpressController {
         link: 'link',
         published_at: 'date',
         image_url: 'featured_media',
-        featured_images: 'acf.event_images'
+        featured_images: 'acf.event_images',
       },
       uploadFields: [
         {
