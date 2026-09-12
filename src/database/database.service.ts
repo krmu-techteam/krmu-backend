@@ -2,9 +2,58 @@ import { Injectable } from '@nestjs/common';
 import { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 import { db } from './database';
+import { postgresDb } from './postgres.database';
 
 @Injectable()
 export class DatabaseService {
+  async testPostgres() {
+    try {
+      const result = await postgresDb.query(`
+      SELECT current_database() AS database, NOW() AS time
+    `);
+
+      console.log('✅ PostgreSQL connected');
+      console.log('Database:', result.rows[0].database);
+      console.log('Time:', result.rows[0].time);
+
+      return result.rows;
+    } catch (error) {
+      console.error('❌ PostgreSQL connection failed');
+
+      if (error instanceof Error) {
+        console.error(error.message);
+      } else {
+        console.error(error);
+      }
+
+      throw error;
+    }
+  }
+
+  async getHomePageComponents() {
+    try {
+      const result = await postgresDb.query(`
+      SELECT *
+      FROM home_pages_cmps
+      ORDER BY entity_id, "order"
+    `);
+
+      console.log('✅ Home page components:');
+      console.table(result.rows);
+
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Failed to fetch home page components');
+
+      if (error instanceof Error) {
+        console.error(error.message);
+      } else {
+        console.error(error);
+      }
+
+      throw error;
+    }
+  }
   /**
    * Get executor
    */
@@ -97,7 +146,7 @@ export class DatabaseService {
     const executor = this.getExecutor(connection);
 
     const sql = `
-      SELECT *
+      SELECT id
       FROM ${table}
       WHERE id = ?
         AND deleted_at IS NULL

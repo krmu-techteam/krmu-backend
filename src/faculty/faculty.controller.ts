@@ -33,14 +33,21 @@ export class FacultyController {
     @Query('limit') limit = 10,
     @Query('search') search = '',
     @Query('status') status?: 'published' | 'draft',
+    @Query('id') id?: number,
   ) {
     return this.facultyService.getFacultyCards(
       Number(page),
       Number(limit),
       search,
       status,
+      id ? Number(id) : undefined,
     );
   }
+
+  @Get(':id')
+  async getFacultyById(@Param('id') id: string) {
+    return this.facultyService.getFacultyById(Number(id));
+  } 
 
   /**
    * Create a new faculty member.

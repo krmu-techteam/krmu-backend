@@ -1,5 +1,7 @@
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsEmail,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -10,8 +12,9 @@ import {
 } from 'class-validator';
 
 export class CreateFacultyDto {
-  @IsInt()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
   school_category_id?: number;
 
   @IsString()
@@ -32,32 +35,67 @@ export class CreateFacultyDto {
   @IsOptional()
   qualifications!: string;
 
-  @IsString()
-  @IsOptional()
-  image_url?: string;
+  // @IsString()
+  // @IsOptional()
+  // image_url?: string;
 
   // Multiple emails
-  @IsArray()
-  @IsString({ each: true })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (!value) return [];
+
+    if (Array.isArray(value)) return value;
+
+    return value
+      .split(',')
+      .map((email: string) => email.trim())
+      .filter(Boolean);
+  })
+  @IsArray()
+  @IsEmail({}, { each: true })
   emails?: string[];
 
   // Multiple LinkedIn profiles
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (!value) return [];
+
+    if (Array.isArray(value)) return value;
+
+    return value
+      .split(',')
+      .map((url: string) => url.trim())
+      .filter(Boolean);
+  })
   @IsArray()
   @IsUrl({}, { each: true })
-  @IsOptional()
   linkedin_profiles?: string[];
 
   // Multiple interest areas
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (!value) return [];
+
+    if (Array.isArray(value)) return value;
+
+    return value
+      .split(',')
+      .map((item: string) => item.trim())
+      .filter(Boolean);
+  })
   @IsArray()
   @IsString({ each: true })
-  @IsOptional()
   interest_areas?: string[];
 
   // Accordion content
   @IsString()
   @IsOptional()
   profile?: string;
+
+  @IsString()
+  @IsOptional()
+  project_achievements?: string;
+
 
   @IsString()
   @IsOptional()

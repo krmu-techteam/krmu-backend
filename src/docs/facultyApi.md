@@ -11,7 +11,7 @@ Base URL:
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/faculty` | Get all active faculty |
-| GET | `/faculty?page=1&limit=10` | Get paginated faculty |
+| GET | `/faculty?page=1&limit=10` | Get paginated faculty | 
 | GET | `/faculty?search=rahul` | Search faculty |
 | GET | `/faculty?status=published` | Get published faculty |
 | GET | `/faculty?status=draft` | Get draft faculty |

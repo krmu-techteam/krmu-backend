@@ -16,6 +16,8 @@ import { CloudflareService } from '../cloudfare/cloudflare.service';
 import { DatabaseService } from '../database/database.service';
 import { PoolConnection } from 'mysql2/promise';
 import { UpdateFacultyDto } from './update-faculty.dto';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class FacultyService {
@@ -30,6 +32,7 @@ export class FacultyService {
     limit = 10,
     search = '',
     status?: 'published' | 'draft',
+    id?: number,
   ): Promise<FacultyCardResponse> {
     /**
      * Validate pagination values.
@@ -39,26 +42,30 @@ export class FacultyService {
 
     const offset = (page - 1) * limit;
 
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
     /**
      * Base WHERE condition.
      *
      * Soft-deleted faculty should never appear
      * in the normal faculty list.
      */
-    let whereClause = `
-    WHERE deleted_at IS NULL
-  `;
+    conditions.push('deleted_at IS NULL');
 
-    const params: (string | number)[] = [];
+    /**
+     * Filter by faculty ID.
+     */
+    if (id !== undefined) {
+      conditions.push('id = ?');
+      params.push(id);
+    }
 
     /**
      * Filter by status.
      */
     if (status) {
-      whereClause += `
-      AND status = ?
-    `;
-
+      conditions.push('status = ?');
       params.push(status);
     }
 
@@ -68,16 +75,21 @@ export class FacultyService {
     if (search.trim()) {
       const searchTerm = `%${search.trim()}%`;
 
-      whereClause += `
-      AND (
+      conditions.push(`
+      (
         name LIKE ?
         OR designation LIKE ?
-        OR qualification LIKE ?
+        OR qualifications LIKE ?
       )
-    `;
+    `);
 
       params.push(searchTerm, searchTerm, searchTerm);
     }
+
+    /**
+     * Build WHERE clause.
+     */
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
     /**
      * Run count and faculty queries simultaneously.
@@ -85,27 +97,27 @@ export class FacultyService {
     const [countResult, facultyResult] = await Promise.all([
       db.query(
         `
-      SELECT COUNT(*) AS total
-      FROM faculties
-      ${whereClause}
+        SELECT COUNT(*) AS total
+        FROM faculties
+        ${whereClause}
       `,
         params,
       ),
 
       db.query(
         `
-      SELECT
-        id,
-        name,
-        slug,
-        designation,
-        image_url,
-        qualification,
-        status
-      FROM faculties
-      ${whereClause}
-      ORDER BY name ASC
-      LIMIT ? OFFSET ?
+        SELECT
+          id,
+          name,
+          slug,
+          designation,
+          image_url,
+          qualifications,
+          status
+        FROM faculties
+        ${whereClause}
+        ORDER BY name ASC
+        LIMIT ? OFFSET ?
       `,
         [...params, limit, offset],
       ),
@@ -126,16 +138,57 @@ export class FacultyService {
       },
     };
   }
-  async createFaculty(dto: CreateFacultyDto, file: Express.Multer.File) {
-    if (!file) {
-      throw new BadRequestException('Please upload at least one image.');
+
+
+  /**
+   * 
+   * @param id 
+   * @returns 
+   */
+
+  async getFacultyById(id: number) {
+    const [rows] = await db.query(
+      `
+      SELECT
+        id,
+        name,
+        slug,
+        designation,
+        image_url,
+        qualifications,
+        status
+      FROM faculties
+      WHERE id = ?
+        AND deleted_at IS NULL
+      LIMIT 1
+    `,
+      [id],
+    );
+
+    const faculty = (rows as FacultyCard[])[0];
+
+    if (!faculty) {
+      throw new NotFoundException('Faculty not found');
     }
-    validateImage(file);
+
+    return {
+      data: faculty,
+    };
+  }
+
+  async createFaculty(dto: CreateFacultyDto, file: Express.Multer.File) {
     const slug = await generateUniqueSlug(dto.name, (slug) =>
       this.facultyRepository.slugExists(slug),
     );
 
-    const uploadedImage = await this.uploadImage(file, 'faculty');
+    let uploadedImage: UploadResult | null = null;
+
+    if (file) {
+      validateImage(file);
+      uploadedImage = await this.uploadImage(file, 'faculty');
+    }
+
+    // const uploadedImage = await this.uploadImage(file, 'faculty');
     const payload = this.preparePayload(dto, slug, uploadedImage);
 
     try {
@@ -156,7 +209,9 @@ export class FacultyService {
         data: createFaculty,
       };
     } catch (error) {
-      await this.rollbackImage(uploadedImage.key);
+      if (uploadedImage) {
+        await this.rollbackImage(uploadedImage.key);
+      }
 
       if (error instanceof BadRequestException) {
         throw error;

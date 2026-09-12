@@ -12,7 +12,7 @@ dotenv.config();
 import * as path from 'path';
 import { lookup } from 'mime-types';
 import { randomUUID } from 'crypto';
-import { UploadResult } from 'src/common/interfaces/upload-result.interface';
+import { UploadResult } from '../common/interfaces/upload-result.interface';
 // import { HttpService } from '@nestjs/axios';
 
 @Injectable()
@@ -113,7 +113,8 @@ export class CloudflareService implements OnModuleInit {
   ): Promise<UploadResult> {
     const extension = path.extname(file.originalname);
 
-    const fileName = `${file.originalname}`;
+    // const fileName = `${file.originalname}`;
+    const fileName = this.sanitizeFilename(file.originalname);
 
     const key = `images/${folder}/${fileName}`;
 
@@ -130,6 +131,21 @@ export class CloudflareService implements OnModuleInit {
       key,
       url: this.getPublicUrl(key),
     };
+  }
+
+  private sanitizeFilename(originalName: string): string {
+    const extension = path.extname(originalName).toLowerCase();
+    const filename = path.basename(originalName, extension);
+
+    const sanitized = filename
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-') // Replace spaces with hyphens
+      .replace(/[^a-z0-9-_]/g, '') // Remove special characters
+      .replace(/-+/g, '-'); // Remove duplicate hyphens
+
+    // return `${Date.now()}-${randomUUID()}-${sanitized}${extension}`;
+    return `${sanitized}${extension}`;
   }
 
   /**
