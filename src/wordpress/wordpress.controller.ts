@@ -32,6 +32,7 @@ export class WordpressController {
       ],
     });
   }
+
   @Get('school-categories')
   async migrateSchoolCategories() {
     return this.wordpressService.getSchoolCategories();
@@ -57,6 +58,52 @@ export class WordpressController {
         {
           dbColumn: 'image_url',
           wpField: ['acf.event_images'],
+        },
+      ],
+    });
+  }
+
+  @Get('posts')
+  async migratePosts() {
+    return this.wordpressService.getWPData({
+      type: 'posts',
+      table: 'posts',
+
+      mapping: {
+        wp_id: 'id',
+        title: 'title.rendered',
+        slug: 'slug',
+
+        content: 'content.rendered',
+        excerpt: 'excerpt.rendered',
+
+        date: 'date',
+        date_gmt: 'date_gmt',
+
+        status: 'status',
+        type: 'type',
+        link: 'link',
+
+        author: 'author',
+
+        featured_media: 'featured_media',
+
+        comment_status: 'comment_status',
+        ping_status: 'ping_status',
+
+        sticky: 'sticky',
+        template: 'template',
+        format: 'format',
+
+        categories: 'categories',
+        tags: 'tags',
+      },
+
+      uploadFields: [
+        {
+          dbColumn: 'featured_image',
+          wpField: 'featured_media',
+          filename: (record) => `${record.id}-${record.slug}`,
         },
       ],
     });
