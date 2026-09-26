@@ -1,138 +1,83 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { db } from '../database/database';
-import { firstValueFrom } from 'rxjs';
 import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 import * as path from 'path';
+
+import { db } from '../database/database';
 import { CloudflareService } from '../cloudfare/cloudflare.service';
 import { getFolderFromMimeType } from '../helper/media.helper';
 
 interface MediaResponse {
-  guid: {
-    rendered: string;
-  };
+  source_url: string;
   mime_type: string;
 }
 
 @Injectable()
 export class WordpressService {
-  private readonly logger = new Logger(WordpressService.name);
+  private readonly logger = new Logger(
+    WordpressService.name,
+  );
 
   constructor(
     private readonly http: HttpService,
     private readonly cloudflareService: CloudflareService,
   ) {}
 
-  private getNestedValue(obj: any, path: string) {
-    return path.split('.').reduce((acc, key) => acc?.[key], obj);
+  /**
+   * =========================================================
+   * GET NESTED VALUE
+   * =========================================================
+   *
+   * Example:
+   *
+   * getNestedValue(record, 'title.rendered')
+   *
+   * returns:
+   *
+   * record.title.rendered
+   */
+  private getNestedValue(
+    obj: any,
+    objectPath: string,
+  ): any {
+    return objectPath
+      .split('.')
+      .reduce(
+        (acc, key) => acc?.[key],
+        obj,
+      );
   }
 
-  // async getWPData({
-  //   type,
-  //   table,
-  //   mapping,
-  //   uploadFields = [],
-  // }: {
-  //   type: string;
-  //   table: string;
-  //   mapping: Record<string, string>;
-  //   uploadFields?: {
-  //     dbColumn: string;
-  //     wpField: string | string[];
-  //     filename?: (record: any) => string;
-  //   }[];
-  // }) {
-  //   let page = 1;
-  //   const perPage = 100;
-  //   let totalInserted = 0;
+  /**
+   * =========================================================
+   * FETCH WITH TIMEOUT
+   * =========================================================
+   */
+  private async fetchWithTimeout(
+    url: string,
+    timeout = 30000,
+  ): Promise<Response> {
+    const controller =
+      new AbortController();
 
-  //   while (true) {
-  //     console.log(`Fetching ${type} - Page ${page}`);
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeout);
 
-  //     const response = await fetch(
-  //       `https://wp.krmangalam.edu.in/wp-json/wp/v2/${type}?page=${page}&per_page=${perPage}`,
-  //     );
+    try {
+      return await fetch(url, {
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
 
-  //     if (!response.ok) {
-  //       break;
-  //     }
-
-  //     const records = await response.json();
-
-  //     if (!records.length) {
-  //       break;
-  //     }
-
-  //     // Database columns
-  //     const columns = Object.keys(mapping);
-
-  //     // SQL placeholders (?, ?, ?, ...)
-  //     const placeholders = columns.map(() => '?').join(',');
-
-  //     // ON DUPLICATE KEY UPDATE
-  //     const updates = columns
-  //       .filter((c) => c !== 'id')
-  //       .map((c) => `${c}=VALUES(${c})`)
-  //       .join(',');
-
-  //     const sql = `
-  //     INSERT INTO ${table}
-  //     (${columns.join(',')})
-  //     VALUES (${placeholders})
-  //     ON DUPLICATE KEY UPDATE
-  //     ${updates}
-  //   `;
-
-  //     for (const record of records) {
-  //       const row: Record<string, any> = {};
-
-  //       for (const column of columns) {
-  //         row[column] = this.getNestedValue(record, mapping[column]);
-  //       }
-  //       for (const uploadField of uploadFields) {
-  //         const mediaId = this.getNestedValue(record, uploadField.wpField);
-
-  //         if (!mediaId) continue;
-
-  //         try {
-  //           const filename = uploadField.filename
-  //             ? uploadField.filename(record)
-  //             : `${record.id}-${record.slug}`;
-
-  //           row[uploadField.dbColumn] = await this.uploadWordpressAsset(
-  //             type,
-  //             mediaId,
-  //             filename,
-  //           );
-  //         } catch (err) {
-  //           console.error(
-  //             `Failed uploading ${uploadField.dbColumn} for ${record.slug}`,
-  //             err,
-  //           );
-
-  //           row[uploadField.dbColumn] = null;
-  //         }
-  //       }
-
-  //       const values = columns.map((column) => row[column]);
-
-  //       await db.execute(sql, values);
-
-  //       totalInserted++;
-  //     }
-
-  //     console.log(
-  //       `Page ${page}: ${records.length} records inserted into ${table}.`,
-  //     );
-
-  //     page++;
-  //   }
-
-  //   return {
-  //     message: `${type} migration completed.`,
-  //     totalInserted,
-  //   };
-  // }
-
+  /**
+   * =========================================================
+   * WORDPRESS POSTS MIGRATION
+   * =========================================================
+   */
   async getWPData({
     type,
     table,
@@ -141,388 +86,1262 @@ export class WordpressService {
   }: {
     type: string;
     table: string;
-    mapping: Record<string, string>;
+
+    mapping: Record<
+      string,
+      string
+    >;
+
     uploadFields?: {
       dbColumn: string;
-      wpField: string | string[];
-      filename?: (record: any) => string;
+
+      wpField:
+        | string
+        | string[];
+
+      filename?: (
+        record: any,
+      ) => string;
     }[];
   }) {
-    let page = 1;
     const perPage = 100;
-    let totalInserted = 0;
 
-    while (true) {
-      console.log(`Fetching ${type} - Page ${page}`);
+    let page = 1;
+    let totalPages = 1;
+    let totalProcessed = 0;
 
-      const response = await fetch(
-        `https://wp.krmangalam.edu.in/wp-json/wp/v2/${type}?page=${page}&per_page=${perPage}`,
-      );
+    /**
+     * =======================================================
+     * DATABASE COLUMNS
+     * =======================================================
+     *
+     * Mapping columns:
+     *
+     * wp_id
+     * title
+     * slug
+     * content
+     * ...
+     *
+     * Upload columns:
+     *
+     * featured_image
+     */
+    const columns = [
+      ...new Set([
+        ...Object.keys(mapping),
 
-      if (!response.ok) {
-        console.log(`Stopped fetching ${type}. Status: ${response.status}`);
-        break;
-      }
+        ...uploadFields.map(
+          (field) =>
+            field.dbColumn,
+        ),
+      ]),
+    ];
 
-      const records = await response.json();
+    console.log(
+      '========================================',
+    );
 
-      if (!records.length) {
-        break;
-      }
+    console.log(
+      'STARTING WORDPRESS MIGRATION',
+    );
 
-      /**
-       * Include:
-       * 1. Normal mapping columns
-       * 2. Upload field columns
-       */
-      const columns = [
-        ...new Set([
-          ...Object.keys(mapping),
-          ...uploadFields.map((field) => field.dbColumn),
-        ]),
-      ];
+    console.log(
+      'TYPE:',
+      type,
+    );
 
-      // SQL placeholders (?, ?, ?, ...)
-      const placeholders = columns.map(() => '?').join(',');
+    console.log(
+      'TABLE:',
+      table,
+    );
 
-      // ON DUPLICATE KEY UPDATE
-      const updates = columns
-        .filter((column) => column !== 'id')
-        .map((column) => `${column}=VALUES(${column})`)
-        .join(',');
+    console.log(
+      'COLUMNS:',
+      columns,
+    );
 
-      const sql = `
-      INSERT INTO ${table}
-      (${columns.join(',')})
+    console.log(
+      '========================================',
+    );
+
+    /**
+     * =======================================================
+     * SQL PLACEHOLDERS
+     * =======================================================
+     */
+    const placeholders = columns
+      .map(() => '?')
+      .join(',');
+
+    /**
+     * =======================================================
+     * ON DUPLICATE KEY UPDATE
+     * =======================================================
+     *
+     * Don't update:
+     *
+     * id
+     * wp_id
+     */
+    const updates = columns
+      .filter(
+        (column) =>
+          column !== 'id' &&
+          column !== 'wp_id',
+      )
+      .map(
+        (column) =>
+          `\`${column}\` = VALUES(\`${column}\`)`,
+      )
+      .join(',');
+
+    /**
+     * =======================================================
+     * SQL QUERY
+     * =======================================================
+     */
+    const sql = `
+      INSERT INTO \`${table}\`
+      (
+        ${columns
+          .map(
+            (column) =>
+              `\`${column}\``,
+          )
+          .join(',')}
+      )
       VALUES (${placeholders})
       ON DUPLICATE KEY UPDATE
       ${updates}
     `;
 
+    console.log(
+      'SQL:',
+      sql,
+    );
+
+    /**
+     * =======================================================
+     * PAGINATION
+     * =======================================================
+     */
+    while (page <= totalPages) {
+      console.log('');
+      console.log(
+        '========================================',
+      );
+
+      console.log(
+        `FETCHING PAGE ${page}`,
+      );
+
+      console.log(
+        '========================================',
+      );
+
+      /**
+       * WordPress API URL
+       */
+      const wpUrl =
+        `https://wp.krmangalam.edu.in/blog/wp-json/wp/v2/${type}` +
+        `?page=${page}&per_page=${perPage}`;
+
+      console.log(
+        'WP URL:',
+        wpUrl,
+      );
+
+      /**
+       * =====================================================
+       * FETCH WORDPRESS PAGE
+       * =====================================================
+       */
+      let response: Response;
+
+      try {
+        response =
+          await this.fetchWithTimeout(
+            wpUrl,
+            30000,
+          );
+      } catch (error: any) {
+        console.error(
+          `Failed fetching page ${page}`,
+        );
+
+        console.error(
+          error?.message ||
+            error,
+        );
+
+        break;
+      }
+
+      /**
+       * =====================================================
+       * WORDPRESS ERROR
+       * =====================================================
+       */
+      if (!response.ok) {
+        const errorText =
+          await response.text();
+
+        console.error(
+          'WordPress API failed',
+        );
+
+        console.error(
+          'STATUS:',
+          response.status,
+        );
+
+        console.error(
+          'RESPONSE:',
+          errorText,
+        );
+
+        break;
+      }
+
+      /**
+       * =====================================================
+       * GET PAGINATION INFORMATION
+       * =====================================================
+       */
+      const wpTotal =
+        response.headers.get(
+          'X-WP-Total',
+        );
+
+      const wpTotalPages =
+        response.headers.get(
+          'X-WP-TotalPages',
+        );
+
+      if (wpTotal) {
+        console.log(
+          'TOTAL WORDPRESS POSTS:',
+          wpTotal,
+        );
+      }
+
+      if (wpTotalPages) {
+        totalPages =
+          Number(
+            wpTotalPages,
+          );
+
+        console.log(
+          'TOTAL WORDPRESS PAGES:',
+          totalPages,
+        );
+      }
+
+      /**
+       * =====================================================
+       * PARSE JSON
+       * =====================================================
+       */
+      let records: any[];
+
+      try {
+        records =
+          await response.json();
+      } catch (error: any) {
+        console.error(
+          'Failed parsing WordPress JSON',
+        );
+
+        console.error(
+          error?.message ||
+            error,
+        );
+
+        break;
+      }
+
+      /**
+       * =====================================================
+       * NO RECORDS
+       * =====================================================
+       */
+      if (
+        !Array.isArray(
+          records,
+        ) ||
+        records.length === 0
+      ) {
+        console.log(
+          `No records found on page ${page}`,
+        );
+
+        break;
+      }
+
+      console.log(
+        `Page ${page}: ${records.length} records`,
+      );
+
+      /**
+       * =====================================================
+       * PROCESS EACH WORDPRESS POST
+       * =====================================================
+       */
       for (const record of records) {
-        const row: Record<string, any> = {};
+        console.log('');
+        console.log(
+          '----------------------------------------',
+        );
+
+        console.log(
+          `PROCESSING WP POST: ${record.id}`,
+        );
+
+        console.log(
+          `SLUG: ${record.slug}`,
+        );
+
+        console.log(
+          `FEATURED MEDIA: ${record.featured_media}`,
+        );
+
+        console.log(
+          '----------------------------------------',
+        );
 
         /**
-         * ----------------------------------------
-         * NORMAL WORDPRESS FIELDS
-         * ----------------------------------------
+         * Row that will eventually
+         * become DB values.
          */
-        // for (const [column, wpPath] of Object.entries(mapping)) {
-        //   row[column] = this.getNestedValue(record, wpPath);
-        // }
-        for (const [column, wpPath] of Object.entries(mapping)) {
-          const value = this.getNestedValue(record, wpPath);
+        const row: Record<
+          string,
+          any
+        > = {};
 
-          row[column] = Array.isArray(value) ? JSON.stringify(value) : value;
-        }
         /**
-         * ----------------------------------------
-         * UPLOAD WORDPRESS MEDIA TO R2
-         * ----------------------------------------
+         * ===================================================
+         * NORMAL WORDPRESS FIELDS
+         * ===================================================
+         */
+        for (const [
+          column,
+          wpPath,
+        ] of Object.entries(
+          mapping,
+        )) {
+          const value =
+            this.getNestedValue(
+              record,
+              wpPath,
+            );
+
+          /**
+           * Convert arrays to JSON.
+           *
+           * Example:
+           *
+           * categories:
+           * [1, 5, 10]
+           *
+           * becomes:
+           *
+           * "[1,5,10]"
+           */
+          row[column] =
+            Array.isArray(value)
+              ? JSON.stringify(
+                  value,
+                )
+              : value;
+        }
+
+        console.log(
+          'Normal mapping completed:',
+          record.id,
+        );
+
+        /**
+         * ===================================================
+         * MEDIA / IMAGE UPLOAD
+         * ===================================================
          */
         for (const uploadField of uploadFields) {
+          console.log(
+            `Processing media field: ${uploadField.dbColumn}`,
+          );
+
           try {
             /**
-             * Normalize wpField.
+             * Normalize wpField
+             *
+             * string:
              *
              * "featured_media"
              *
              * becomes:
              *
              * ["featured_media"]
-             *
-             * while:
-             *
-             * ["featured_media", "acf.event_images"]
-             *
-             * stays the same.
              */
-            const wpFields = Array.isArray(uploadField.wpField)
-              ? uploadField.wpField
-              : [uploadField.wpField];
+            const wpFields =
+              Array.isArray(
+                uploadField.wpField,
+              )
+                ? uploadField.wpField
+                : [
+                    uploadField.wpField,
+                  ];
 
             /**
-             * Collect all media IDs.
-             *
-             * Supports:
-             *
-             * featured_media: 114925
-             *
-             * event_images: [
-             *   114925,
-             *   114931
-             * ]
+             * All media IDs
              */
-            const mediaIds: (string | number)[] = [];
+            const mediaIds: (
+              | string
+              | number
+            )[] = [];
 
+            /**
+             * =================================================
+             * COLLECT MEDIA IDS
+             * =================================================
+             */
             for (const wpField of wpFields) {
-              const value = this.getNestedValue(record, wpField);
+              const value =
+                this.getNestedValue(
+                  record,
+                  wpField,
+                );
 
-              if (value === null || value === undefined || value === '') {
+              console.log(
+                `WP FIELD ${wpField}:`,
+                value,
+              );
+
+              /**
+               * No value
+               */
+              if (
+                value === null ||
+                value ===
+                  undefined ||
+                value === ''
+              ) {
                 continue;
               }
 
               /**
-               * WP field contains array
-               *
-               * Example:
-               * [114925, 114931]
+               * Array of media IDs
                */
-              if (Array.isArray(value)) {
+              if (
+                Array.isArray(
+                  value,
+                )
+              ) {
                 for (const id of value) {
-                  if (id !== null && id !== undefined && id !== '') {
-                    mediaIds.push(id);
+                  if (
+                    id !==
+                      null &&
+                    id !==
+                      undefined &&
+                    id !== '' &&
+                    Number(id) !== 0
+                  ) {
+                    mediaIds.push(
+                      id,
+                    );
                   }
                 }
               } else {
                 /**
-                 * WP field contains single ID
-                 *
-                 * Example:
-                 * 114925
+                 * Single media ID
                  */
-                mediaIds.push(value);
+                if (
+                  Number(
+                    value,
+                  ) !== 0
+                ) {
+                  mediaIds.push(
+                    value,
+                  );
+                }
               }
             }
 
+            console.log(
+              'MEDIA IDS:',
+              mediaIds,
+            );
+
             /**
-             * No media found
+             * =================================================
+             * NO MEDIA
+             * =================================================
              */
-            if (!mediaIds.length) {
-              row[uploadField.dbColumn] = null;
+            if (
+              mediaIds.length ===
+              0
+            ) {
+              row[
+                uploadField.dbColumn
+              ] = null;
+
+              console.log(
+                'No media found.',
+              );
+
               continue;
             }
 
             /**
-             * Upload all media
+             * =================================================
+             * UPLOAD MEDIA
+             * =================================================
              */
-            const uploadedUrls: string[] = [];
+            const uploadedUrls: string[] =
+              [];
 
-            for (let i = 0; i < mediaIds.length; i++) {
-              const mediaId = mediaIds[i];
-
-              const baseFilename = uploadField.filename
-                ? uploadField.filename(record)
-                : `${record.id}-${record.slug}`;
+            for (
+              let i = 0;
+              i <
+              mediaIds.length;
+              i++
+            ) {
+              const mediaId =
+                mediaIds[i];
 
               /**
-               * Avoid same filename when multiple
-               * images exist.
+               * Filename
+               */
+              const baseFilename =
+                uploadField.filename
+                  ? uploadField.filename(
+                      record,
+                    )
+                  : `${record.id}-${record.slug}`;
+
+              /**
+               * Multiple images
                *
-               * Example:
-               *
-               * 123-event-1
-               * 123-event-2
-               * 123-event-3
+               * image-1
+               * image-2
+               * image-3
                */
               const filename =
-                mediaIds.length > 1 ? `${baseFilename}-${i + 1}` : baseFilename;
+                mediaIds.length >
+                1
+                  ? `${baseFilename}-${i + 1}`
+                  : baseFilename;
+
+              console.log(
+                `Uploading media ${mediaId}`,
+              );
+
+              console.log(
+                `Filename: ${filename}`,
+              );
 
               try {
-                const uploadedUrl = await this.uploadWordpressAsset(
-                  type,
-                  mediaId,
-                  filename,
-                );
+                /**
+                 * IMPORTANT
+                 *
+                 * type is passed here because
+                 * uploadWordpressAsset uses it
+                 * in the R2 key.
+                 */
+                const uploadedUrl =
+                  await this.uploadWordpressAsset(
+                    type,
+                    mediaId,
+                    filename,
+                  );
 
-                if (uploadedUrl) {
-                  uploadedUrls.push(uploadedUrl);
+                if (
+                  uploadedUrl
+                ) {
+                  uploadedUrls.push(
+                    uploadedUrl,
+                  );
+
+                  console.log(
+                    'UPLOAD SUCCESS:',
+                    uploadedUrl,
+                  );
                 }
               } catch (error) {
                 console.error(
-                  `Failed uploading media ${mediaId} for ${record.slug}`,
+                  `Media ${mediaId} upload failed:`,
                   error,
                 );
               }
             }
 
             /**
-             * Nothing successfully uploaded
+             * =================================================
+             * SAVE UPLOADED URL
+             * =================================================
              */
-            if (!uploadedUrls.length) {
-              row[uploadField.dbColumn] = null;
-              continue;
+            if (
+              uploadedUrls.length ===
+              0
+            ) {
+              row[
+                uploadField.dbColumn
+              ] = null;
+            } else if (
+              uploadedUrls.length ===
+              1
+            ) {
+              /**
+               * Single image
+               */
+              row[
+                uploadField.dbColumn
+              ] =
+                uploadedUrls[0];
+            } else {
+              /**
+               * Multiple images
+               */
+              row[
+                uploadField.dbColumn
+              ] =
+                JSON.stringify(
+                  uploadedUrls,
+                );
             }
-
-            /**
-             * Single image:
-             *
-             * https://cdn.../image.webp
-             *
-             * Multiple images:
-             *
-             * [
-             *   "https://cdn.../1.webp",
-             *   "https://cdn.../2.webp"
-             * ]
-             */
-            row[uploadField.dbColumn] =
-              uploadedUrls.length === 1
-                ? uploadedUrls[0]
-                : JSON.stringify(uploadedUrls);
           } catch (error) {
             console.error(
-              `Failed processing ${uploadField.dbColumn} for ${record.slug}`,
+              `Media processing failed for ${record.id}:`,
               error,
             );
 
-            row[uploadField.dbColumn] = null;
+            row[
+              uploadField.dbColumn
+            ] = null;
           }
         }
 
         /**
-         * ----------------------------------------
+         * ===================================================
          * CREATE VALUES IN COLUMN ORDER
-         * ----------------------------------------
+         * ===================================================
+         *
+         * Example:
+         *
+         * columns:
+         *
+         * [
+         *   "wp_id",
+         *   "title",
+         *   "slug",
+         *   "featured_image"
+         * ]
+         *
+         * values:
+         *
+         * [
+         *   14622,
+         *   "Entrepreneurship Skills",
+         *   "entrepreneurship-skills",
+         *   "https://cdn..."
+         * ]
          */
-        const values = columns.map((column) => row[column] ?? null);
+        const values =
+          columns.map(
+            (column) =>
+              row[column] ??
+              null,
+          );
+
+        console.log(
+          'VALUES PREPARED:',
+          record.id,
+        );
 
         /**
-         * ----------------------------------------
-         * INSERT / UPDATE DATABASE
-         * ----------------------------------------
+         * ===================================================
+         * DATABASE INSERT / UPDATE
+         * ===================================================
          */
         try {
-          await db.execute(sql, values);
+          console.log(
+            `BEFORE DB INSERT: ${record.id}`,
+          );
 
-          totalInserted++;
+          await db.execute(
+            sql,
+            values,
+          );
+
+          totalProcessed++;
+
+          console.log(
+            `AFTER DB INSERT: ${record.id}`,
+          );
+
+          console.log(
+            `SUCCESS WP ID: ${record.id}`,
+          );
         } catch (error) {
-          console.error(`Failed inserting ${record.slug} into ${table}`, error);
+          console.error(
+            `DATABASE ERROR for WP ID ${record.id}`,
+          );
+
+          console.error(
+            error,
+          );
+
+          console.error(
+            'ROW:',
+            row,
+          );
         }
+
+        console.log(
+          `FINISHED WP POST: ${record.id}`,
+        );
       }
 
+      /**
+       * =====================================================
+       * PAGE COMPLETE
+       * =====================================================
+       */
+      console.log('');
+
       console.log(
-        `Page ${page}: ${records.length} records processed into ${table}.`,
+        `PAGE ${page}/${totalPages} COMPLETED`,
       );
 
       page++;
     }
 
+    /**
+     * =======================================================
+     * MIGRATION COMPLETE
+     * =======================================================
+     */
+    console.log('');
     console.log(
-      `Migration completed: ${totalInserted} records processed into ${table}.`,
+      '========================================',
+    );
+
+    console.log(
+      'WORDPRESS MIGRATION COMPLETED',
+    );
+
+    console.log(
+      'TOTAL PROCESSED:',
+      totalProcessed,
+    );
+
+    console.log(
+      'TOTAL PAGES:',
+      totalPages,
+    );
+
+    console.log(
+      '========================================',
     );
 
     return {
       success: true,
-      totalInserted,
+      totalProcessed,
+      totalPages,
     };
   }
 
+  /**
+   * =========================================================
+   * SCHOOL CATEGORIES
+   * =========================================================
+   */
   async getSchoolCategories() {
-    const response = await fetch(
-      'https://truthful-cabbage-82fd27e8f6.strapiapp.com/api/school-categories',
-    );
+    const response =
+      await fetch(
+        'https://truthful-cabbage-82fd27e8f6.strapiapp.com/api/school-categories',
+      );
 
     if (!response.ok) {
-      throw new Error('Failed to fetch school categories');
+      throw new Error(
+        'Failed to fetch school categories',
+      );
     }
 
-    const { data } = await response.json();
+    const { data } =
+      await response.json();
 
     let totalInserted = 0;
 
     for (const school of data) {
       await db.execute(
         `
-      INSERT INTO school_categories (id, school_name, slug)
-      VALUES (?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        school_name = VALUES(school_name),
-        slug = VALUES(slug)
-      `,
-        [school.id, school.name, school.slug],
+        INSERT INTO school_categories
+        (
+          id,
+          school_name,
+          slug
+        )
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          school_name = VALUES(school_name),
+          slug = VALUES(slug)
+        `,
+        [
+          school.id,
+          school.name,
+          school.slug,
+        ],
       );
 
       totalInserted++;
     }
 
     return {
-      message: 'School categories migrated successfully.',
+      message:
+        'School categories migrated successfully.',
       totalInserted,
     };
   }
 
+  /**
+   * =========================================================
+   * GET WORDPRESS MEDIA BY ID
+   * =========================================================
+   *
+   * IMPORTANT:
+   *
+   * Uses:
+   *
+   * /wp-json/wp/v2/media/{id}
+   *
+   * NOT:
+   *
+   * /posts/{id}
+   */
   async getMediaById(
     imgId: number | string,
-  ): Promise<{ url: string; mimeType: string } | null> {
-    if (!imgId) return null;
+  ): Promise<{
+    url: string;
+    mimeType: string;
+  } | null> {
+    if (
+      !imgId ||
+      Number(imgId) === 0
+    ) {
+      return null;
+    }
+
+    const url =
+      `https://wp.krmangalam.edu.in/blog/wp-json/wp/v2/media/${imgId}` +
+      `?_fields=source_url,mime_type`;
 
     try {
-      const { data } = await firstValueFrom(
-        this.http.get<MediaResponse>(
-          `https://wp.krmangalam.edu.in/wp-json/wp/v2/media/${imgId}?_fields=guid,mime_type`,
-        ),
+      console.log(
+        `Fetching WordPress media API: ${imgId}`,
+      );
+
+      const { data } =
+        await firstValueFrom(
+          this.http.get<MediaResponse>(
+            url,
+            {
+              timeout: 30000,
+            },
+          ),
+        );
+
+      if (
+        !data ||
+        !data.source_url
+      ) {
+        this.logger.warn(
+          `No source_url found for media ${imgId}`,
+        );
+
+        return null;
+      }
+
+      console.log(
+        `Media API success: ${imgId}`,
+      );
+
+      console.log(
+        `SOURCE URL: ${data.source_url}`,
+      );
+
+      console.log(
+        `MIME TYPE: ${data.mime_type}`,
       );
 
       return {
-        url: data.guid.rendered,
-        mimeType: data.mime_type,
+        url: data.source_url,
+        mimeType:
+          data.mime_type,
       };
-    } catch (error) {
-      this.logger.warn(`Media not found for ID ${imgId}`);
+    } catch (error: any) {
+      this.logger.error(
+        `Media API failed for ${imgId}`,
+        error?.message ||
+          error,
+      );
+
       return null;
     }
   }
 
-  async downloadMedia(url: string): Promise<Buffer> {
-    const { data } = await firstValueFrom(
-      this.http.get(url, {
-        responseType: 'arraybuffer',
-      }),
-    );
+  /**
+   * =========================================================
+   * DOWNLOAD WORDPRESS MEDIA
+   * =========================================================
+   */
+  async downloadMedia(
+    url: string,
+  ): Promise<Buffer> {
+    try {
+      console.log(
+        `Downloading media: ${url}`,
+      );
 
-    return Buffer.from(data);
+      const { data } =
+        await firstValueFrom(
+          this.http.get(
+            url,
+            {
+              responseType:
+                'arraybuffer',
+
+              timeout: 30000,
+
+              maxContentLength:
+                50 *
+                1024 *
+                1024,
+
+              maxBodyLength:
+                50 *
+                1024 *
+                1024,
+            },
+          ),
+        );
+
+      const buffer =
+        Buffer.from(data);
+
+      console.log(
+        `Downloaded media: ${buffer.length} bytes`,
+      );
+
+      return buffer;
+    } catch (error: any) {
+      this.logger.error(
+        `Media download failed: ${url}`,
+        error?.message ||
+          error,
+      );
+
+      throw error;
+    }
   }
 
+  /**
+   * =========================================================
+   * UPLOAD WORDPRESS ASSET
+   * =========================================================
+   */
   async uploadWordpressAsset(
     type: string,
     mediaId: number | string,
     filename: string,
   ): Promise<string | null> {
-    const media = await this.getMediaById(mediaId);
+    try {
+      console.log('');
+      console.log(
+        '========================================',
+      );
 
-    if (!media) return null;
+      console.log(
+        `START MEDIA: ${mediaId}`,
+      );
 
-    const mimeType = getFolderFromMimeType(media.mimeType);
-    const extension = path.extname(media.url);
+      console.log(
+        `TYPE: ${type}`,
+      );
 
-    const key = `${mimeType}/${type}/${filename}${extension}`;
+      console.log(
+        `FILENAME: ${filename}`,
+      );
 
-    // Check if file already exists in R2
-    const exists = await this.cloudflareService.fileExists(key);
+      console.log(
+        '========================================',
+      );
 
-    if (exists) {
-      console.log(`Skipping existing image: ${key}`);
+      /**
+       * =====================================================
+       * GET MEDIA INFORMATION
+       * =====================================================
+       */
+      const media =
+        await this.getMediaById(
+          mediaId,
+        );
 
-      // Return same URL/path without uploading again
-      return this.cloudflareService.getPublicUrl(key);
+      if (!media) {
+        console.error(
+          `Media not found: ${mediaId}`,
+        );
+
+        return null;
+      }
+
+      console.log(
+        `Media found: ${mediaId}`,
+      );
+
+      console.log(
+        `Media URL: ${media.url}`,
+      );
+
+      console.log(
+        `MIME Type: ${media.mimeType}`,
+      );
+
+      /**
+       * =====================================================
+       * MIME FOLDER
+       * =====================================================
+       */
+      const mimeFolder =
+        getFolderFromMimeType(
+          media.mimeType,
+        );
+
+      console.log(
+        `MIME Folder: ${mimeFolder}`,
+      );
+
+      /**
+       * =====================================================
+       * FILE EXTENSION
+       * =====================================================
+       */
+      let extension = '';
+
+      try {
+        extension =
+          path.extname(
+            new URL(
+              media.url,
+            ).pathname,
+          );
+      } catch {
+        extension =
+          path.extname(
+            media.url,
+          );
+      }
+
+      /**
+       * If URL has no extension
+       */
+      if (!extension) {
+        extension =
+          this.getExtensionFromMimeType(
+            media.mimeType,
+          );
+      }
+
+      console.log(
+        `Extension: ${extension}`,
+      );
+
+      /**
+       * =====================================================
+       * CLEAN FILENAME
+       * =====================================================
+       */
+      const cleanFilename =
+        filename
+          .replace(
+            /[^a-zA-Z0-9_-]/g,
+            '-',
+          )
+          .replace(
+            /-+/g,
+            '-',
+          );
+
+      /**
+       * =====================================================
+       * R2 KEY
+       * =====================================================
+       *
+       * Example:
+       *
+       * image/posts/14622-entrepreneurship-skills.jpg
+       */
+      const key =
+        `${mimeFolder}/${type}/${cleanFilename}${extension}`;
+
+      console.log(
+        `R2 KEY: ${key}`,
+      );
+
+      /**
+       * =====================================================
+       * CHECK R2
+       * =====================================================
+       */
+      console.log(
+        `Checking R2 file: ${key}`,
+      );
+
+      let exists = false;
+
+      try {
+        exists =
+          await this.cloudflareService.fileExists(
+            key,
+          );
+      } catch (error) {
+        console.error(
+          `R2 fileExists failed for ${key}`,
+          error,
+        );
+
+        /**
+         * If checking existence fails,
+         * don't crash entire migration.
+         *
+         * Continue with upload.
+         */
+        exists = false;
+      }
+
+      console.log(
+        `R2 exists: ${exists}`,
+      );
+
+      /**
+       * =====================================================
+       * FILE ALREADY EXISTS
+       * =====================================================
+       */
+      if (exists) {
+        console.log(
+          `Skipping existing image: ${key}`,
+        );
+
+        const publicUrl =
+          this.cloudflareService.getPublicUrl(
+            key,
+          );
+
+        console.log(
+          `Existing public URL: ${publicUrl}`,
+        );
+
+        return publicUrl;
+      }
+
+      /**
+       * =====================================================
+       * DOWNLOAD FROM WORDPRESS
+       * =====================================================
+       */
+      console.log(
+        `Downloading from WordPress...`,
+      );
+
+      const buffer =
+        await this.downloadMedia(
+          media.url,
+        );
+
+      if (
+        !buffer ||
+        buffer.length === 0
+      ) {
+        console.error(
+          `Empty buffer for media ${mediaId}`,
+        );
+
+        return null;
+      }
+
+      console.log(
+        `Download completed: ${buffer.length} bytes`,
+      );
+
+      /**
+       * =====================================================
+       * UPLOAD TO R2
+       * =====================================================
+       */
+      console.log(
+        `Uploading to R2: ${key}`,
+      );
+
+      const uploadedUrl =
+        await this.cloudflareService.uploadWordpressMedia(
+          key,
+          buffer,
+        );
+
+      console.log(
+        `R2 upload completed: ${key}`,
+      );
+
+      console.log(
+        `PUBLIC URL: ${uploadedUrl}`,
+      );
+
+      return uploadedUrl;
+    } catch (error: any) {
+      console.error(
+        `Failed processing WordPress media ${mediaId}`,
+      );
+
+      console.error(
+        error?.message ||
+          error,
+      );
+
+      return null;
     }
-
-    // Only download from WordPress when R2 doesn't have it
-    const buffer = await this.downloadMedia(media.url);
-
-    return this.cloudflareService.uploadWordpressMedia(key, buffer);
   }
 
-  //   async uploadWordpressAsset(
-  //     type: string,
-  //     mediaId: number,
-  //     filename: string,
-  //   ): Promise<string | null> {
-  //     const media = await this.getMediaById(mediaId);
+  /**
+   * =========================================================
+   * MIME TYPE -> EXTENSION
+   * =========================================================
+   */
+  private getExtensionFromMimeType(
+    mimeType: string,
+  ): string {
+    const mimeExtensions: Record<
+      string,
+      string
+    > = {
+      'image/jpeg': '.jpg',
+      'image/jpg': '.jpg',
+      'image/png': '.png',
+      'image/webp': '.webp',
+      'image/gif': '.gif',
+      'image/svg+xml': '.svg',
+      'image/avif': '.avif',
 
-  //     if (!media) return null;
+      'video/mp4': '.mp4',
+      'video/webm': '.webm',
 
-  //     const mimeType = getFolderFromMimeType(media.mimeType);
+      'application/pdf': '.pdf',
+    };
 
-  //     const extension = path.extname(media.url);
-
-  //     const buffer = await this.downloadMedia(media.url);
-
-  //     return this.cloudflareService.uploadWordpressMedia(
-  //       `${mimeType}/${type}/${filename}${extension}`,
-  //       buffer,
-  //     );
-  //   }
-  // }
+    return (
+      mimeExtensions[
+        mimeType
+      ] || ''
+    );
+  }
 }
