@@ -1,24 +1,23 @@
-import { PoolConnection } from 'mysql2/promise';
-import { db } from './database';
+import { PoolClient } from 'pg';
+import { postgresDb } from './database';
 
 export async function withTransaction<T>(
-  callback: (connection: PoolConnection) => Promise<T>,
+  callback: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-  const connection = await db.getConnection();
+  const client = await postgresDb.connect();
 
   try {
-    await connection.beginTransaction();
+    await client.query('BEGIN');
 
-    const result = await callback(connection);
+    const result = await callback(client);
 
-    await connection.commit();
+    await client.query('COMMIT');
 
     return result;
   } catch (error) {
-    await connection.rollback();
-
+    await client.query('ROLLBACK');
     throw error;
   } finally {
-    connection.release();
+    client.release();
   }
 }

@@ -5,14 +5,14 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CatsController } from './cats.controller';
 
-import { WordpressModule } from './wordpress/wordpress.module';
-import { FacultyModule } from './faculty/faculty.module';
 import { CloudflareModule } from './cloudfare/cloudflare.module';
-import { NewsEventsModule } from './newsAndEvents/news_events.module';
-import { CdcTeamModule } from './cdc-team/cdc-team.module';
-import { DriveCalendarModule } from './drive-calendar/drive-calendar.module';
 import { DatabaseController } from './database-controller/database-controller.controller';
 import { DatabaseService } from './database/database.service';
+import { PostCategoriesController } from './post-categories/post-categories.controller';
+import { PostCategoriesService } from './post-categories/post-categories.service';
+import { DatabaseModule } from './database/database.module';
+import { PostCategoriesModule } from './post-categories/post-categories.module';
+import { BlogModule } from './blog/blog.module';
 
 @Module({
   imports: [
@@ -21,16 +21,14 @@ import { DatabaseService } from './database/database.service';
       envFilePath: '.env',
     }),
 
-    WordpressModule,
-    FacultyModule,
-    CdcTeamModule,
     CloudflareModule,
-    NewsEventsModule,
-    DriveCalendarModule,
+    DatabaseModule,
+    PostCategoriesModule,
+    BlogModule,
   ],
 
   controllers: [AppController, CatsController, DatabaseController],
 
-  providers: [AppService, DatabaseService],
+  providers: [AppService],
 })
 export class AppModule {}

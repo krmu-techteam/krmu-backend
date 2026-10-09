@@ -1,294 +1,443 @@
-import { Injectable } from '@nestjs/common';
-import { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
+import { postgresDb } from './database';
 
-import { db } from './database';
-import { postgresDb } from './postgres.database';
+type DatabaseExecutor = typeof postgresDb | PoolClient;
+type SortOrder = 'ASC' | 'DESC';
 
 @Injectable()
 export class DatabaseService {
-  async testPostgres() {
-    try {
-      const result = await postgresDb.query(`
-      SELECT current_database() AS database, NOW() AS time
-    `);
-
-      console.log('✅ PostgreSQL connected');
-      console.log('Database:', result.rows[0].database);
-      console.log('Time:', result.rows[0].time);
-
-      return result.rows;
-    } catch (error) {
-      console.error('❌ PostgreSQL connection failed');
-
-      if (error instanceof Error) {
-        console.error(error.message);
-      } else {
-        console.error(error);
-      }
-
-      throw error;
-    }
-  }
-
-  async getHomePageComponents() {
-    try {
-      const result = await postgresDb.query(`
-      SELECT *
-      FROM home_pages_cmps
-      ORDER BY entity_id, "order"
-    `);
-
-      console.log('✅ Home page components:');
-      console.table(result.rows);
-
-      return result.rows;
-    } catch (error) {
-      console.error('❌ Failed to fetch home page components');
-
-      if (error instanceof Error) {
-        console.error(error.message);
-      } else {
-        console.error(error);
-      }
-
-      throw error;
-    }
-  }
   /**
-   * Get executor
+   * Validate and quote table/column identifiers.
+   * Supports: faculties, public.faculties, deleted_at
    */
-  private getExecutor(connection?: PoolConnection) {
-    return connection ?? db;
+  private quoteIdentifier(identifier: string): string {
+    if (typeof identifier !== 'string' || !identifier.trim()) {
+      throw new BadRequestException('Database identifier cannot be empty');
+    }
+
+    const parts = identifier.split('.');
+    const validIdentifier = /^[a-zA-Z_][a-zA-Z0-9_$]*$/;
+
+    if (!parts.every((part) => validIdentifier.test(part))) {
+      throw new BadRequestException(
+        `Invalid database identifier: ${identifier}`,
+      );
+    }
+
+    return parts.map((part) => `"${part}"`).join('.');
   }
 
   /**
-   * Insert Record
+   * Validate insert/update data.
+   */
+  private validateData(data: Record<string, unknown>): string[] {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new BadRequestException('Data must be an object');
+    }
+
+    const columns = Object.keys(data);
+
+    if (columns.length === 0) {
+      throw new BadRequestException('At least one field is required');
+    }
+
+    columns.forEach((column) => this.quoteIdentifier(column));
+
+    return columns;
+  }
+
+  /**
+   * Get pool or transaction client.
+   */
+  private getExecutor(client?: PoolClient): DatabaseExecutor {
+    return client ?? postgresDb;
+  }
+
+  /**
+   * Test PostgreSQL connection.
+   */
+  async testPostgres() {
+    const result = await postgresDb.query(`
+      SELECT
+        current_database() AS database,
+        NOW() AS time
+    `);
+
+    return result.rows[0];
+  }
+
+  /**
+   * Insert record.
+   * Returns the inserted ID.
    */
   async insert(
     table: string,
-    data: Record<string, any>,
-    connection?: PoolConnection,
-  ) {
-    const executor = this.getExecutor(connection);
+    data: Record<string, unknown>,
+    client?: PoolClient,
+  ): Promise<number | string | undefined> {
+    const executor = this.getExecutor(client);
 
-    const columns = Object.keys(data);
-    const values = Object.values(data);
+    try {
+      console.log('\n========== INSERT DEBUG ==========');
+      console.log('Table:', table);
+      console.log('Input data:', data);
 
-    const placeholders = columns.map(() => '?').join(', ');
+      const columns = this.validateData(data);
+      console.log('Validated columns:', columns);
 
-    const sql = `
-      INSERT INTO ${table}
-      (${columns.join(', ')})
+      const tableName = this.quoteIdentifier(table);
+      console.log('Quoted table:', tableName);
+
+      const columnNames = columns
+        .map((column) => this.quoteIdentifier(column))
+        .join(', ');
+
+      const placeholders = columns
+        .map((_, index) => `$${index + 1}`)
+        .join(', ');
+
+      const values = columns.map((column) => data[column]);
+
+      const sql = `
+      INSERT INTO ${tableName} (${columnNames})
       VALUES (${placeholders})
+      RETURNING id
     `;
 
-    const [result] = await executor.query<ResultSetHeader>(sql, values);
+      const result = await executor.query(sql, values);
 
-    return result.insertId;
+      return result.rows[0]?.id;
+    } catch (error) {
+      console.error('\n========== INSERT FAILED ==========');
+      console.error('Table:', table);
+      console.error('Input data:', data);
+
+      if (error && typeof error === 'object' && 'message' in error) {
+        const dbError = error as {
+          message: string;
+          code?: string;
+          detail?: string;
+          constraint?: string;
+          table?: string;
+          column?: string;
+          position?: string;
+        };
+
+        console.error('Error message:', dbError.message);
+        console.error('PostgreSQL error code:', dbError.code);
+        console.error('Error detail:', dbError.detail);
+        console.error('Constraint:', dbError.constraint);
+        console.error('Error table:', dbError.table);
+        console.error('Error column:', dbError.column);
+        console.error('SQL position:', dbError.position);
+      } else {
+        console.error('Unknown error:', error);
+      }
+
+      console.error('===================================\n');
+      throw error;
+    }
   }
 
   /**
-   * Update Record
+   * Update record.
+   * hasDeletedAt = false for tables without deleted_at.
    */
   async update(
     table: string,
-    id: number,
-    data: Record<string, any>,
-    connection?: PoolConnection,
-  ) {
-    const executor = this.getExecutor(connection);
+    id: number | string,
+    data: Record<string, unknown>,
+    client?: PoolClient,
+    hasDeletedAt = true,
+  ): Promise<boolean> {
+    const executor = this.getExecutor(client);
+    const columns = this.validateData(data);
+    const tableName = this.quoteIdentifier(table);
 
-    const columns = Object.keys(data);
+    const setClause = columns
+      .map((column, index) => `${this.quoteIdentifier(column)} = $${index + 1}`)
+      .join(', ');
 
-    const values = Object.values(data);
+    const values = columns.map((column) => data[column]);
 
-    const setClause = columns.map((column) => `${column} = ?`).join(', ');
-
-    const sql = `
-      UPDATE ${table}
+    let sql = `
+      UPDATE ${tableName}
       SET ${setClause}
-      WHERE id = ?
-      AND deleted_at IS NULL
+      WHERE id = $${values.length + 1}
     `;
 
-    const [result] = await executor.query<ResultSetHeader>(sql, [
-      ...values,
-      id,
-    ]);
-    return result.affectedRows > 0;
+    if (hasDeletedAt) {
+      sql += ' AND deleted_at IS NULL';
+    }
+
+    const result = await executor.query(sql, [...values, id]);
+
+    return (result.rowCount ?? 0) > 0;
   }
 
   /**
-   * Delete Record
-   * @param table
-   * @param id
-   * @param connection
-   * @returns
+   * Permanently delete record.
    */
-  async delete(table: string, id: number, connection?: PoolConnection) {
-    const executor = this.getExecutor(connection);
+  async delete(
+    table: string,
+    id: number | string,
+    client?: PoolClient,
+  ): Promise<boolean> {
+    const executor = this.getExecutor(client);
+    const tableName = this.quoteIdentifier(table);
 
-    const sql = `
-      DELETE
-      FROM ${table}
-      WHERE id = ?
-    `;
+    const result = await executor.query(
+      `DELETE FROM ${tableName} WHERE id = $1`,
+      [id],
+    );
 
-    const [result] = await executor.query<ResultSetHeader>(sql, [id]);
-
-    return result.affectedRows > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   /**
-   * Find By ID
+   * Soft-delete record.
    */
-  async findById(table: string, id: number, connection?: PoolConnection) {
-    const executor = this.getExecutor(connection);
+  async softDelete(
+    table: string,
+    id: number | string,
+    client?: PoolClient,
+  ): Promise<boolean> {
+    const executor = this.getExecutor(client);
+    const tableName = this.quoteIdentifier(table);
 
-    const sql = `
-      SELECT id
-      FROM ${table}
-      WHERE id = ?
-        AND deleted_at IS NULL
-      LIMIT 1
-    `;
+    const result = await executor.query(
+      `
+        UPDATE ${tableName}
+        SET deleted_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+          AND deleted_at IS NULL
+      `,
+      [id],
+    );
 
-    const [rows] = await executor.query<RowDataPacket[]>(sql, [id]);
-
-    return rows.length ? rows[0] : null;
+    return (result.rowCount ?? 0) > 0;
   }
 
   /**
-   * Find One
+   * Find record by ID.
+   * hasDeletedAt = false for tables without deleted_at.
+   */
+  async findById(
+    table: string,
+    id: number | string,
+    client?: PoolClient,
+    hasDeletedAt = true,
+  ) {
+    const executor = this.getExecutor(client);
+    const tableName = this.quoteIdentifier(table);
+
+    let sql = `
+      SELECT *
+      FROM ${tableName}
+      WHERE id = $1
+    `;
+
+    if (hasDeletedAt) {
+      sql += ' AND deleted_at IS NULL';
+    }
+
+    sql += ' LIMIT 1';
+
+    const result = await executor.query(sql, [id]);
+
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * Find one record by column and value.
    */
   async findOne(
     table: string,
     column: string,
-    value: any,
-    connection?: PoolConnection,
+    value: unknown,
+    client?: PoolClient,
   ) {
-    const executor = this.getExecutor(connection);
+    const executor = this.getExecutor(client);
+    const tableName = this.quoteIdentifier(table);
+    const columnName = this.quoteIdentifier(column);
 
-    const sql = `
-      SELECT *
-      FROM ${table}
-      WHERE ${column} = ?
-      LIMIT 1
-    `;
+    const result = await executor.query(
+      `
+        SELECT *
+        FROM ${tableName}
+        WHERE ${columnName} = $1
+        LIMIT 1
+      `,
+      [value],
+    );
 
-    const [rows] = await executor.query<RowDataPacket[]>(sql, [value]);
-
-    return rows.length ? rows[0] : null;
+    return result.rows[0] ?? null;
   }
-
   /**
-   * Find All
+   * Execute a PostgreSQL query.
+   */
+  async query(sql: string, params: unknown[] = [], client?: PoolClient) {
+    const executor = this.getExecutor(client);
+    return executor.query(sql, params);
+  }
+  /**
+   * Find all records.
    */
   async findAll(
     table: string,
     orderBy = 'id',
-    order: 'ASC' | 'DESC' = 'DESC',
-    connection?: PoolConnection,
+    order: SortOrder = 'DESC',
+    client?: PoolClient,
+    hasDeletedAt = true,
+    conditions?: Record<string, unknown>,
   ) {
-    const executor = this.getExecutor(connection);
+    const executor = this.getExecutor(client);
+    const tableName = this.quoteIdentifier(table);
+    const orderColumn = this.quoteIdentifier(orderBy);
 
-    const sql = `
-      SELECT *
-      FROM ${table}
-      WHERE deleted_at IS NULL
-      ORDER BY ${orderBy} ${order}
-    `;
+    if (order !== 'ASC' && order !== 'DESC') {
+      throw new BadRequestException('Order must be ASC or DESC');
+    }
 
-    const [rows] = await executor.query<RowDataPacket[]>(sql);
+    let sql = `SELECT * FROM ${tableName}`;
 
-    return rows;
+    const values: unknown[] = [];
+    const whereConditions: string[] = [];
+
+    // Exclude soft-deleted records when supported.
+    if (hasDeletedAt) {
+      whereConditions.push('"deleted_at" IS NULL');
+    }
+
+    // Dynamic WHERE conditions.
+    if (conditions) {
+      for (const [column, value] of Object.entries(conditions)) {
+        const columnName = this.quoteIdentifier(column);
+
+        if (value === null) {
+          whereConditions.push(`${columnName} IS NULL`);
+        } else {
+          values.push(value);
+          whereConditions.push(`${columnName} = $${values.length}`);
+        }
+      }
+    }
+
+    if (whereConditions.length > 0) {
+      sql += ` WHERE ${whereConditions.join(' AND ')}`;
+    }
+
+    sql += ` ORDER BY ${orderColumn} ${order}`;
+
+    const result = await executor.query(sql, values);
+
+    return result.rows;
   }
 
   /**
-   * Exists
+   * Check whether a record exists.
    */
   async exists(
     table: string,
     column: string,
-    value: any,
-    connection?: PoolConnection,
-  ) {
-    const executor = this.getExecutor(connection);
+    value: unknown,
+    client?: PoolClient,
+  ): Promise<boolean> {
+    const executor = this.getExecutor(client);
+    const tableName = this.quoteIdentifier(table);
+    const columnName = this.quoteIdentifier(column);
 
-    const sql = `
-      SELECT 1
-      FROM ${table}
-      WHERE ${column} = ?
-      LIMIT 1
-    `;
+    const result = await executor.query(
+      `
+        SELECT 1
+        FROM ${tableName}
+        WHERE ${columnName} = $1
+        LIMIT 1
+      `,
+      [value],
+    );
 
-    const [rows] = await executor.query<RowDataPacket[]>(sql, [value]);
-
-    return rows.length > 0;
-  }
-
-  async transaction<T>(
-    callback: (connection: PoolConnection) => Promise<T>,
-  ): Promise<T> {
-    const connection = await db.getConnection();
-
-    try {
-      await connection.beginTransaction();
-
-      const result = await callback(connection);
-
-      await connection.commit();
-
-      return result;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    return result.rows.length > 0;
   }
 
   /**
-   * Get Trash Records
+   * Get soft-deleted records.
    */
   async findTrash(
     table: string,
     orderBy = 'deleted_at',
-    order: 'ASC' | 'DESC' = 'DESC',
-    connection?: PoolConnection,
+    order: SortOrder = 'DESC',
+    client?: PoolClient,
   ) {
-    const executor = this.getExecutor(connection);
-    const sql = `
+    const executor = this.getExecutor(client);
+    const tableName = this.quoteIdentifier(table);
+    const orderColumn = this.quoteIdentifier(orderBy);
+
+    if (order !== 'ASC' && order !== 'DESC') {
+      throw new BadRequestException('Order must be ASC or DESC');
+    }
+
+    const result = await executor.query(`
       SELECT *
-      FROM ${table}
+      FROM ${tableName}
       WHERE deleted_at IS NOT NULL
-      ORDER BY ${orderBy} ${order}
-    `;
-    const [rows] = await executor.query<RowDataPacket[]>(sql);
-    return rows;
+      ORDER BY ${orderColumn} ${order}
+    `);
+
+    return result.rows;
   }
 
   /**
-   * Restore
-   *
-   * @param table
-   * @param id
-   * @param connection
+   * Restore a soft-deleted record.
    */
-
   async restore(
     table: string,
-    id: number,
-    connection?: PoolConnection,
+    id: number | string,
+    client?: PoolClient,
   ): Promise<boolean> {
-    const executor = this.getExecutor(connection);
-    const sql = `
-      Update ${table}
-      SET deleted_at = NULL
-      WHERE id = ?
-       AND deleted_at IS NOT NULL
-    `;
-    const [result] = await executor.query<ResultSetHeader>(sql, [id]);
-    return result.affectedRows > 0;
+    const executor = this.getExecutor(client);
+    const tableName = this.quoteIdentifier(table);
+
+    const result = await executor.query(
+      `
+        UPDATE ${tableName}
+        SET deleted_at = NULL
+        WHERE id = $1
+          AND deleted_at IS NOT NULL
+      `,
+      [id],
+    );
+
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Run operations in a transaction.
+   */
+  async transaction<T>(
+    callback: (client: PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await postgresDb.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const result = await callback(client);
+
+      await client.query('COMMIT');
+
+      return result;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('❌ PostgreSQL rollback failed:', rollbackError);
+      }
+
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
