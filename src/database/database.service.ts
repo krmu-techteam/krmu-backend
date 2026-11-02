@@ -71,6 +71,75 @@ export class DatabaseService {
    * Insert record.
    * Returns the inserted ID.
    */
+  // async insert(
+  //   table: string,
+  //   data: Record<string, unknown>,
+  //   client?: PoolClient,
+  // ): Promise<number | string | undefined> {
+  //   const executor = this.getExecutor(client);
+
+  //   try {
+  //     console.log('\n========== INSERT DEBUG ==========');
+  //     console.log('Table:', table);
+  //     console.log('Input data:', data);
+
+  //     const columns = this.validateData(data);
+  //     console.log('Validated columns:', columns);
+
+  //     const tableName = this.quoteIdentifier(table);
+  //     console.log('Quoted table:', tableName);
+
+  //     const columnNames = columns
+  //       .map((column) => this.quoteIdentifier(column))
+  //       .join(', ');
+
+  //     const placeholders = columns
+  //       .map((_, index) => `$${index + 1}`)
+  //       .join(', ');
+
+  //     const values = columns.map((column) => data[column]);
+
+  //     const sql = `
+  //     INSERT INTO ${tableName} (${columnNames})
+  //     VALUES (${placeholders})
+  //     RETURNING id
+  //   `;
+
+  //     const result = await executor.query(sql, values);
+
+  //     return result.rows[0]?.id;
+  //   } catch (error) {
+  //     console.error('\n========== INSERT FAILED ==========');
+  //     console.error('Table:', table);
+  //     console.error('Input data:', data);
+
+  //     if (error && typeof error === 'object' && 'message' in error) {
+  //       const dbError = error as {
+  //         message: string;
+  //         code?: string;
+  //         detail?: string;
+  //         constraint?: string;
+  //         table?: string;
+  //         column?: string;
+  //         position?: string;
+  //       };
+
+  //       console.error('Error message:', dbError.message);
+  //       console.error('PostgreSQL error code:', dbError.code);
+  //       console.error('Error detail:', dbError.detail);
+  //       console.error('Constraint:', dbError.constraint);
+  //       console.error('Error table:', dbError.table);
+  //       console.error('Error column:', dbError.column);
+  //       console.error('SQL position:', dbError.position);
+  //     } else {
+  //       console.error('Unknown error:', error);
+  //     }
+
+  //     console.error('===================================\n');
+  //     throw error;
+  //   }
+  // }
+
   async insert(
     table: string,
     data: Record<string, unknown>,
@@ -79,25 +148,70 @@ export class DatabaseService {
     const executor = this.getExecutor(client);
 
     try {
-      console.log('\n========== INSERT DEBUG ==========');
+      console.log('\n========== INSERT DEBUG START ==========');
+
+      // 1. Table
+      console.log('STEP 1: Table');
       console.log('Table:', table);
+
+      // 2. Input data
+      console.log('STEP 2: Input data');
       console.log('Input data:', data);
 
+      // 3. Validate columns
+      console.log('STEP 3: Validating columns');
+
       const columns = this.validateData(data);
+
       console.log('Validated columns:', columns);
 
+      // 4. Quote table
+      console.log('STEP 4: Quoting table');
+
       const tableName = this.quoteIdentifier(table);
+
       console.log('Quoted table:', tableName);
 
+      // 5. Create column names
+      console.log('STEP 5: Creating column names');
+
       const columnNames = columns
-        .map((column) => this.quoteIdentifier(column))
+        .map((column) => {
+          console.log('Quoting column:', column);
+
+          const quotedColumn = this.quoteIdentifier(column);
+
+          console.log('Quoted column:', quotedColumn);
+
+          return quotedColumn;
+        })
         .join(', ');
+
+      console.log('Column names:', columnNames);
+
+      // 6. Create placeholders
+      console.log('STEP 6: Creating placeholders');
 
       const placeholders = columns
         .map((_, index) => `$${index + 1}`)
         .join(', ');
 
-      const values = columns.map((column) => data[column]);
+      console.log('Placeholders:', placeholders);
+
+      // 7. Create values
+      console.log('STEP 7: Creating values');
+
+      const values = columns.map((column) => {
+        console.log('Getting value for column:', column);
+        console.log('Value:', data[column]);
+
+        return data[column];
+      });
+
+      console.log('Final values:', values);
+
+      // 8. Create SQL
+      console.log('STEP 8: Creating SQL');
 
       const sql = `
       INSERT INTO ${tableName} (${columnNames})
@@ -105,37 +219,62 @@ export class DatabaseService {
       RETURNING id
     `;
 
+      console.log('SQL:', sql);
+
+      // 9. Execute query
+      console.log('STEP 9: Executing INSERT...');
+
+      const startTime = Date.now();
+
       const result = await executor.query(sql, values);
 
-      return result.rows[0]?.id;
+      console.log(`STEP 10: INSERT completed in ${Date.now() - startTime}ms`);
+
+      // 10. Returned rows
+      console.log('Returned rows:', result.rows);
+
+      // 11. Get ID
+      const insertedId = result.rows[0]?.id;
+
+      console.log('Inserted ID:', insertedId);
+
+      console.log('========== INSERT DEBUG SUCCESS ==========\n');
+
+      return insertedId;
     } catch (error) {
-      console.error('\n========== INSERT FAILED ==========');
+      console.error('\n========== INSERT DEBUG FAILED ==========');
+
       console.error('Table:', table);
       console.error('Input data:', data);
 
-      if (error && typeof error === 'object' && 'message' in error) {
+      if (error && typeof error === 'object') {
         const dbError = error as {
-          message: string;
+          message?: string;
           code?: string;
           detail?: string;
+          hint?: string;
           constraint?: string;
           table?: string;
           column?: string;
           position?: string;
+          routine?: string;
         };
 
         console.error('Error message:', dbError.message);
-        console.error('PostgreSQL error code:', dbError.code);
-        console.error('Error detail:', dbError.detail);
+        console.error('PostgreSQL code:', dbError.code);
+        console.error('Detail:', dbError.detail);
+        console.error('Hint:', dbError.hint);
         console.error('Constraint:', dbError.constraint);
         console.error('Error table:', dbError.table);
         console.error('Error column:', dbError.column);
-        console.error('SQL position:', dbError.position);
+        console.error('Position:', dbError.position);
+        console.error('Routine:', dbError.routine);
       } else {
         console.error('Unknown error:', error);
       }
 
-      console.error('===================================\n');
+      console.error('=========================================\n');
+
       throw error;
     }
   }
@@ -223,6 +362,7 @@ export class DatabaseService {
    * Find record by ID.
    * hasDeletedAt = false for tables without deleted_at.
    */
+
   async findById(
     table: string,
     id: number | string,
@@ -230,24 +370,107 @@ export class DatabaseService {
     hasDeletedAt = true,
   ) {
     const executor = this.getExecutor(client);
-    const tableName = this.quoteIdentifier(table);
 
-    let sql = `
+    try {
+      console.log('\n========== FIND BY ID DEBUG ==========');
+
+      console.log('Table:', table);
+      console.log('ID:', id);
+      console.log('hasDeletedAt:', hasDeletedAt);
+
+      const tableName = this.quoteIdentifier(table);
+
+      console.log('Quoted table:', tableName);
+
+      let sql = `
       SELECT *
       FROM ${tableName}
       WHERE id = $1
     `;
 
-    if (hasDeletedAt) {
-      sql += ' AND deleted_at IS NULL';
+      if (hasDeletedAt) {
+        sql += ' AND deleted_at IS NULL';
+      }
+
+      sql += ' LIMIT 1';
+
+      console.log('SQL:', sql);
+      console.log('Values:', [id]);
+
+      console.log('Executing SELECT...');
+
+      const result = await executor.query(sql, [id]);
+
+      console.log('SELECT completed');
+      console.log('Rows:', result.rows);
+
+      const row = result.rows[0] ?? null;
+
+      console.log('Found row:', row);
+
+      console.log('========== FIND BY ID SUCCESS ==========\n');
+
+      return row;
+    } catch (error) {
+      console.error('\n========== FIND BY ID FAILED ==========');
+
+      console.error('Table:', table);
+      console.error('ID:', id);
+
+      if (error && typeof error === 'object') {
+        const dbError = error as {
+          message?: string;
+          code?: string;
+          detail?: string;
+          hint?: string;
+          table?: string;
+          column?: string;
+          position?: string;
+          routine?: string;
+        };
+
+        console.error('Error message:', dbError.message);
+        console.error('PostgreSQL code:', dbError.code);
+        console.error('Detail:', dbError.detail);
+        console.error('Hint:', dbError.hint);
+        console.error('Error table:', dbError.table);
+        console.error('Error column:', dbError.column);
+        console.error('Position:', dbError.position);
+        console.error('Routine:', dbError.routine);
+      } else {
+        console.error('Unknown error:', error);
+      }
+
+      console.error('========================================\n');
+
+      throw error;
     }
-
-    sql += ' LIMIT 1';
-
-    const result = await executor.query(sql, [id]);
-
-    return result.rows[0] ?? null;
   }
+  // async findById(
+  //   table: string,
+  //   id: number | string,
+  //   client?: PoolClient,
+  //   hasDeletedAt = true,
+  // ) {
+  //   const executor = this.getExecutor(client);
+  //   const tableName = this.quoteIdentifier(table);
+
+  //   let sql = `
+  //     SELECT *
+  //     FROM ${tableName}
+  //     WHERE id = $1
+  //   `;
+
+  //   if (hasDeletedAt) {
+  //     sql += ' AND deleted_at IS NULL';
+  //   }
+
+  //   sql += ' LIMIT 1';
+
+  //   const result = await executor.query(sql, [id]);
+
+  //   return result.rows[0] ?? null;
+  // }
 
   /**
    * Find one record by column and value.

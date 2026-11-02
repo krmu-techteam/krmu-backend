@@ -33,10 +33,11 @@ export class CreateBlogDto {
 
   @IsString()
   @IsOptional()
-  image?: string;
+  featured_image?: string;
 
   @IsString()
   @IsNotEmpty()
+  @IsOptional()
   content!: string;
 
   @IsOptional()
@@ -48,12 +49,16 @@ export class CreateBlogDto {
   seo_description?: string;
 
   @IsOptional()
+  @IsString()
+  seo_keywords?: string;
+
+  @IsOptional()
   @IsEnum(['index', 'noindex'])
-  robot_index?: 'index' | 'noindex';
+  seo_robots_index?: 'index' | 'noindex';
 
   @IsOptional()
   @IsEnum(['follow', 'nofollow'])
-  robot_follow?: 'follow' | 'nofollow';
+  seo_robots_follow?: 'follow' | 'nofollow';
 
   @IsEnum(['published', 'draft'])
   status!: 'published' | 'draft';

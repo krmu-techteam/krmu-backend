@@ -4,6 +4,7 @@ import { DatabaseService } from '../database/database.service';
 import { CreateBlogDto } from './create-blog.dto';
 import { PoolClient } from 'pg';
 import { withTransaction } from '../database/transaction';
+import { UpdateBlogDto } from './update-blog.dto';
 
 @Injectable()
 export class BlogRepository {
@@ -25,14 +26,16 @@ export class BlogRepository {
         slug,
         content: dto.content ?? null,
 
+        featured_image: dto.featured_image ?? null,
         // Backend-managed fields
-        categories: dto.category_ids,
+        categories: JSON.stringify(dto.category_ids),
 
         // Optional SEO fields
         seo_title: dto.seo_title ?? null,
         seo_description: dto.seo_description ?? null,
-        seo_robots_index: dto.robot_index ?? null,
-        seo_robots_follow: dto.robot_follow ?? null,
+        seo_keywords: dto.seo_keywords ?? null,
+        seo_robots_index: dto.seo_robots_index ?? null,
+        seo_robots_follow: dto.seo_robots_follow ?? null,
         // Status
         status: dto.status ?? 'draft',
       };
@@ -50,7 +53,7 @@ export class BlogRepository {
       );
 
       if (!category) {
-        throw new Error('Created post category could not be retrieved.');
+        throw new Error('Created post could not be retrieved.');
       }
 
       return category;
@@ -64,5 +67,38 @@ export class BlogRepository {
   }
   async slugExists(slug: string, client?: PoolClient) {
     return this.databaseService.exists(this.table, 'slug', slug, client);
+  }
+
+  async softDelete(id: number): Promise<boolean> {
+    return this.databaseService.update(this.table, id, {
+      deleted_at: new Date(),
+    });
+  }
+
+  /**
+   * Find faculty by ID
+   */
+  async findById(id: number, connection?: PoolClient) {
+    return this.databaseService.findById(this.table, id, connection);
+  }
+
+  /**
+   * Update blog.
+   */
+  async update(id: number, data: UpdateBlogDto, connection?: PoolClient) {
+    const updateData: Record<string, unknown> = {
+      ...data,
+    };
+
+    /**
+     * Convert category_ids to categories JSON.
+     */
+    if (data.category_ids !== undefined) {
+      updateData.categories = JSON.stringify(data.category_ids);
+
+      delete updateData.category_ids;
+    }
+
+    return this.databaseService.update(this.table, id, updateData, connection);
   }
 }
